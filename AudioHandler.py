@@ -152,14 +152,14 @@ def apply_reference(input_frequencies, input_levels, reference_frequencies, refe
     # Fill start gap with first reference value
     if from_start_to_ref_indexes is not None and from_start_to_ref_indexes > 0:
         reference_levels_interpolated_start = np.ones((len(input_levels), from_start_to_ref_indexes), dtype=float) \
-                       * reference_levels.transpose()[0][:, None]
+                                              * reference_levels.transpose()[0][:, None]
     else:
         reference_levels_interpolated_start = np.empty((len(input_levels), 0), dtype=float)
 
     # Fill end gap with last reference value
     if from_end_to_ref_indexes is not None and from_end_to_ref_indexes < 0:
         reference_levels_interpolated_end = np.ones((len(input_levels), abs(from_end_to_ref_indexes)), dtype=float) \
-                     * reference_levels.transpose()[-1][:, None]
+                                            * reference_levels.transpose()[-1][:, None]
     else:
         reference_levels_interpolated_end = np.empty((len(input_levels), 0), dtype=float)
 
@@ -345,6 +345,17 @@ def stretch_to(list_, target_length: int):
             value = out[i]
 
     return out
+
+
+def clamp(n, min_, max_):
+    """
+    Clamps number to range
+    :param n: number to clamp
+    :param min_: minimum allowed value
+    :param max_: maximum allowed value
+    :return: clamped value
+    """
+    return max(min(max_, n), min_)
 
 
 class AudioHandler:
@@ -558,16 +569,8 @@ class AudioHandler:
                 # Expected index of peak
                 fft_max_expected_index = frequency_to_index(frequency, sample_rate, len(input_data))
 
-                # Unexpected index of peak (prev peak)
-                fft_max_unexpected_index = -1
-                if measure_latency_stage == MEASURE_LATENCY_STAGE_FREQ_2:
-                    fft_max_unexpected_index = \
-                        frequency_to_index(MEASURE_LATENCY_FREQ_1, sample_rate, len(input_data))
-
-                # Expected frequency is detected and no unexpected frequency
-                if abs(fft_mean) / abs(fft_max) > 2 and abs(fft_max_index - fft_max_expected_index) < 2. \
-                        and (fft_max_unexpected_index < 0 or abs(fft_mean)
-                             / abs(fft_dbfs[fft_max_unexpected_index]) < 2):
+                # Expected frequency is detected
+                if abs(fft_mean) / abs(fft_max) > 2 and abs(fft_max_index - fft_max_expected_index) < 5.:
                     # Detected 1st frequency -> start counting
                     if measure_latency_stage == MEASURE_LATENCY_STAGE_FREQ_1:
                         measure_latency_started = True
@@ -593,7 +596,7 @@ class AudioHandler:
                 # Show info message
                 if self.update_label_info is not None:
                     self.update_label_info.emit('Playing frequency: ' + str(frequency)
-                                                + ' Hz, Reading: ' + str(int(fft_dbfs[fft_max_unexpected_index]))
+                                                + ' Hz, Reading: ' + str(int(fft_dbfs[fft_max_expected_index]))
                                                 + ' dBFS, Latency: ' + str(chunks_counter * self.chunk_size)
                                                 + ' samples')
 
