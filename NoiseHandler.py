@@ -22,7 +22,7 @@ import numpy as np
 from PyQt5 import QtCore
 
 from AudioHandler import generate_window, compute_fft_dbfs, TEST_SIGNAL_TYPE_NOISE, butter_bandpass_filter, \
-    index_to_frequency, frequency_to_index
+    index_to_frequency, frequency_to_index, clamp
 
 # Filter formula:
 # filter_k = -(((sample_rate / chunk_size) * fft_size_chunks) / (FILTER_SCALE * signal_duration_chunks)) + 1
@@ -84,8 +84,8 @@ class NoiseHandler:
             chunk_size = self.audio_handler.chunk_size
             volume = int(self.settings_handler.settings['audio_playback_volume']) / 100.
             sample_rate = int(self.settings_handler.settings['audio_sample_rate'])
-            signal_start_freq = int(self.settings_handler.settings['signal_start_freq'])
-            signal_stop_freq = int(self.settings_handler.settings['signal_stop_freq'])
+            signal_start_freq = clamp(int(self.settings_handler.settings['signal_start_freq']), 0, sample_rate // 2 - 1)
+            signal_stop_freq = clamp(int(self.settings_handler.settings['signal_stop_freq']), 0, sample_rate // 2 - 1)
             signal_duration_s = int(self.settings_handler.settings['signal_test_duration'])
             fft_size_chunks = int(self.settings_handler.settings['fft_size_chunks'])
             noise_filter_order = int(self.settings_handler.settings['noise_filter_order'])
