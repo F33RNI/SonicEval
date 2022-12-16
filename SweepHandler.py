@@ -22,21 +22,10 @@ import traceback
 import numpy as np
 from PyQt5 import QtCore
 
-from AudioHandler import generate_window, compute_fft_dbfs, frequency_to_index, index_to_frequency
+from AudioHandler import generate_window, compute_fft_dbfs, frequency_to_index, index_to_frequency, clamp
 
 # How many indexes +/- to take along with the expected frequency
 FREQUENCY_INDEX_TOLERANCE = 5
-
-
-def clamp(n, min_, max_):
-    """
-    Clamps number to range
-    :param n: number to clamp
-    :param min_: minimum allowed value
-    :param max_: maximum allowed value
-    :return: clamped value
-    """
-    return max(min(max_, n), min_)
 
 
 class SweepHandler:
@@ -66,15 +55,18 @@ class SweepHandler:
         Calculates list of frequencies to sweep from signal_start_freq to signal_stop_freq
         :return:
         """
+        sample_rate = int(self.settings_handler.settings['audio_sample_rate'])
+
         # Calculate number of points
-        one_sample_duration_s = 1. / float(self.settings_handler.settings['audio_sample_rate'])
+        one_sample_duration_s = 1. / float(sample_rate)
+
         chunk_duration_s = self.audio_handler.chunk_size * one_sample_duration_s
         one_point_duration_s = chunk_duration_s * int(self.settings_handler.settings['fft_size_chunks'])
         number_of_points = int(int(self.settings_handler.settings['signal_test_duration']) / one_point_duration_s)
 
         # Get settings
-        signal_start_freq = int(self.settings_handler.settings['signal_start_freq'])
-        signal_stop_freq = int(self.settings_handler.settings['signal_stop_freq'])
+        signal_start_freq = clamp(int(self.settings_handler.settings['signal_start_freq']), 0, sample_rate // 2 - 1)
+        signal_stop_freq = clamp(int(self.settings_handler.settings['signal_stop_freq']), 0, sample_rate // 2 - 1)
 
         self.sweep_frequencies = []
         for i in range(number_of_points):
@@ -179,6 +171,10 @@ class SweepHandler:
             # Sine wave phase
             phase = 0
 
+            # Previous played frequency
+            frequency_last = -1
+            frequency_last_played_counter = 0
+
             # Playback data buffer (floats)
             samples = np.zeros(chunk_size, dtype=np.float)
 
@@ -188,6 +184,8 @@ class SweepHandler:
 
             # Resulted data (per channel)
             sweep_result_dbfs = np.empty((recording_channels, 0), dtype=np.float)
+            sweep_result_frequencies = np.empty(0, dtype=int)
+            result_dbfs_buffer = np.zeros(recording_channels, dtype=np.float)
 
             # Clear existing data
             self.audio_handler.frequency_response_frequencies = []
@@ -245,14 +243,13 @@ class SweepHandler:
                                                                 recording_channels))
                         data_per_channels = np.split(input_data, recording_channels, axis=1)
 
-                        # Array of peak values for each channel
-                        peak_value_by_channel = []
-
                         # Info data
-                        frequency_expected_avg = 0
                         fft_actual_peak_hz_avg = 0
                         fft_in_range_peak_hz_avg = 0
                         fft_mean_avg_dbfs = 0
+
+                        # Get frequency from delay buffer
+                        frequency_delayed = self.sweep_frequencies[frequency_indexes_buffer[-1]]
 
                         # Compute FFT for each channel
                         for channel_n in range(recording_channels):
@@ -261,10 +258,6 @@ class SweepHandler:
 
                             # Compute FFT
                             fft_dbfs = compute_fft_dbfs(data_per_channels[channel_n].flatten(), window, window_type)
-
-                            # Get frequency from delay buffer
-                            frequency_delayed = self.sweep_frequencies[frequency_indexes_buffer[-1]]
-                            frequency_expected_avg += frequency_delayed
 
                             # Calculate frequency indexes
                             frequency_start_index = max(
@@ -292,24 +285,40 @@ class SweepHandler:
                             # Mean signal level
                             fft_mean_avg_dbfs += np.mean(fft_dbfs)
 
-                            # Record result
-                            peak_value_by_channel.append(peak_value)
+                            # Add result to buffer
+                            result_dbfs_buffer[channel_n] += peak_value
 
                             # Exit?
-                            if frequency_indexes_buffer[-1] == len(self.sweep_frequencies) - 2:
+                            if frequency_indexes_buffer[-1] == len(self.sweep_frequencies) - 1:
                                 self.sweep_thread_running = False
                                 if not internal_calibration:
                                     self.measurement_completed = True
 
                         # Calculate average info
-                        frequency_expected_avg /= recording_channels
                         fft_actual_peak_hz_avg /= recording_channels
                         fft_in_range_peak_hz_avg /= recording_channels
                         fft_mean_avg_dbfs /= recording_channels
 
-                        # Add new data
-                        sweep_result_dbfs = np.append(sweep_result_dbfs,
-                                                      np.array([peak_value_by_channel]).transpose(), axis=1)
+                        # Increment frequency change counter
+                        frequency_last_played_counter += 1
+
+                        # If frequency has changed or it was last frequency
+                        if frequency_delayed != frequency_last or self.measurement_completed:
+                            # Append avg level to final result
+                            sweep_result_dbfs = \
+                                np.append(sweep_result_dbfs,
+                                          np.array([np.divide(result_dbfs_buffer,
+                                                              frequency_last_played_counter)]).transpose(), axis=1)
+
+                            # Append frequency
+                            sweep_result_frequencies = np.append(sweep_result_frequencies, frequency_delayed)
+
+                            # Clear buffer and counter
+                            result_dbfs_buffer[:] = 0
+                            frequency_last_played_counter = 0
+
+                        # Store last frequency
+                        frequency_last = frequency_delayed
 
                         # Normal mode
                         if not internal_calibration:
@@ -324,8 +333,7 @@ class SweepHandler:
                                 self.audio_handler.frequency_response_levels_per_channels = sweep_result_dbfs
 
                             # Send frequency data to AudioHandler class
-                            self.audio_handler.frequency_response_frequencies \
-                                = np.array(self.sweep_frequencies[0: len(sweep_result_dbfs[0])], dtype=int)
+                            self.audio_handler.frequency_response_frequencies = sweep_result_frequencies.copy()
 
                             # Plot graph
                             if self.plot_on_graph_signal is not None:
@@ -333,7 +341,7 @@ class SweepHandler:
 
                             # Print info
                             if self.update_label_info is not None:
-                                self.update_label_info.emit('Exp. peak: ' + str(int(frequency_expected_avg)) + ' Hz'
+                                self.update_label_info.emit('Exp. peak: ' + str(int(frequency_delayed)) + ' Hz'
                                                             + ', Act. peak: ' + str(int(fft_actual_peak_hz_avg)) + ' Hz'
                                                             + ', Meas. peak: ' + str(int(fft_in_range_peak_hz_avg))
                                                             + ' Hz, Mean lvl: ' + str(int(fft_mean_avg_dbfs)) + ' dBFS')
@@ -348,7 +356,7 @@ class SweepHandler:
                             # Print info
                             if self.update_label_info is not None:
                                 self.update_label_info.emit('Internal calibration. Frequency: '
-                                                            + str(int(frequency_expected_avg)) + ' Hz')
+                                                            + str(int(frequency_delayed)) + ' Hz')
 
                             # Set progress (1st part, below 10%)
                             if self.update_measurement_progress is not None:
