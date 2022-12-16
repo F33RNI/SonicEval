@@ -31,7 +31,9 @@ SPEC_FILE_HEADER = 'import PyInstaller.config\n' \
 # Files and folders to include in final build directory (dist/MAIN_FILE folder)
 INCLUDE_FILES = ['icon.png',
                  'examples',
-                 'gui.ui']
+                 'gui.ui',
+                 'README.md',
+                 'LICENSE']
 
 # Files and folders to exclude from final build directory (dist/MAIN_FILE folder)
 EXCLUDE_FILES = []
