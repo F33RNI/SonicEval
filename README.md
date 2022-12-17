@@ -17,6 +17,10 @@
 
 ### Description
 
-README coming soon...
+Pulsely is a free program that allows you to very accurately and professionally measure the frequency response of audio systems, compare them and export
+
+Currently, there are 2 types of frequency response measurements:
+- Using frequency sweep (maximum accuracy, but annoying sound)
+- Using white noise (does not provide high accuracy, but allows you to quickly measure the frequency response without annoying sounds)
 
 ----------
