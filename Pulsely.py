@@ -357,9 +357,9 @@ class Window(QMainWindow):
         self.rbtn_noise.setChecked(True if int(self.settings_handler.settings['signal_type']) == AudioHandler.
                                    TEST_SIGNAL_TYPE_NOISE else False)
         self.signal_start_freq.setValue(int(self.settings_handler.settings['signal_start_freq']))
-        self.signal_start_freq.setMaximum(int(self.settings_handler.settings['audio_sample_rate']) // 2 - 1)
+        self.signal_start_freq.setMaximum(int(self.settings_handler.settings['audio_sample_rate']) // 2)
         self.signal_stop_freq.setValue(int(self.settings_handler.settings['signal_stop_freq']))
-        self.signal_stop_freq.setMaximum(int(self.settings_handler.settings['audio_sample_rate']) // 2 - 1)
+        self.signal_stop_freq.setMaximum(int(self.settings_handler.settings['audio_sample_rate']) // 2)
         self.signal_test_duration.setValue(int(self.settings_handler.settings['signal_test_duration']))
         self.audio_playback_volume.setValue(int(self.settings_handler.settings['audio_playback_volume']))
 
@@ -440,9 +440,9 @@ class Window(QMainWindow):
         self.settings_handler.settings['signal_type'] = AudioHandler.TEST_SIGNAL_TYPE_SWEEP \
             if self.rbtn_sweep.isChecked() else AudioHandler.TEST_SIGNAL_TYPE_NOISE
         self.settings_handler.settings['signal_start_freq'] = int(self.signal_start_freq.value())
-        self.signal_start_freq.setMaximum(int(self.settings_handler.settings['audio_sample_rate']) // 2 - 1)
+        self.signal_start_freq.setMaximum(int(self.settings_handler.settings['audio_sample_rate']) // 2)
         self.settings_handler.settings['signal_stop_freq'] = int(self.signal_stop_freq.value())
-        self.signal_stop_freq.setMaximum(int(self.settings_handler.settings['audio_sample_rate']) // 2 - 1)
+        self.signal_stop_freq.setMaximum(int(self.settings_handler.settings['audio_sample_rate']) // 2)
         self.settings_handler.settings['signal_test_duration'] = int(self.signal_test_duration.value())
         self.settings_handler.settings['audio_playback_volume'] = int(self.audio_playback_volume.value())
 
