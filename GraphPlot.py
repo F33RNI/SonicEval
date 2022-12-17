@@ -112,7 +112,7 @@ class GraphPlot:
         :param normalize_ref: normalize reference data before applying it
         :return:
         """
-        if levels is not None and len(levels) > 1:
+        if levels is not None and len(levels) > 0:
             # Coppy levels array
             levels_copy = levels.copy()
 
