@@ -43,6 +43,7 @@ SETTINGS_DEFAULT = {
 
     'normalize_frequency_response': True,
     'normalize_reference': True,
+    'normalize_to_save': True
 }
 
 
