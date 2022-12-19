@@ -20,7 +20,7 @@ import sys
 
 import psutil
 from PyQt5 import uic, QtGui, QtCore
-from PyQt5.QtCore import QTimer, QCoreApplication
+from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 import AudioHandler
@@ -30,7 +30,7 @@ import NoiseHandler
 import SettingsHandler
 import SweepHandler
 
-APP_VERSION = '1.0.0'
+APP_VERSION = '1.2.0'
 
 SETTINGS_FILE = 'settings.json'
 
@@ -43,8 +43,10 @@ BTN_MEASUREMENT_STOP_TEXT = 'Stop'
 BTN_MEASUREMENT_ACTION_START = 0
 BTN_MEASUREMENT_ACTION_STOP = 1
 MEASUREMENT_STAGE_IDLE = 0
-MEASUREMENT_STAGE_LATENCY = 1
-MEASUREMENT_STAGE_FREQUENCY_RESPONSE = 2
+MEASUREMENT_STAGE_REFERENCE = 1
+MEASUREMENT_STAGE_LATENCY = 2
+MEASUREMENT_STAGE_FREQUENCY_RESPONSE = 3
+MEASUREMENT_STAGE_ABORTED = 4
 
 
 class Window(QMainWindow):
@@ -52,7 +54,6 @@ class Window(QMainWindow):
     update_label_info = QtCore.pyqtSignal(str)  # QtCore.Signal(str)
     update_measurement_progress = QtCore.pyqtSignal(int)  # QtCore.Signal(int)
     measurement_continue_timer_start_signal = QtCore.pyqtSignal(int)  # QtCore.Signal(int)
-    measurement_finish_timer_start_signal = QtCore.pyqtSignal(int)  # QtCore.Signal(int)
     plot_on_graph_signal = QtCore.pyqtSignal()  # QtCore.Signal()
 
     def __init__(self):
@@ -88,6 +89,7 @@ class Window(QMainWindow):
         self.btn_load_reference.clicked.connect(self.load_reference)
         self.btn_clear_reference.clicked.connect(self.clear_reference)
         self.cbox_normalize_reference.clicked.connect(self.normalize_reference)
+        self.cbox_normalize_to_save.clicked.connect(self.write_settings)
 
         # State of main button
         self.btn_measurement_action = BTN_MEASUREMENT_ACTION_START
@@ -95,18 +97,15 @@ class Window(QMainWindow):
         # Current measurement stage
         self.measurement_stage = MEASUREMENT_STAGE_IDLE
 
-        # Measurement timers
+        # Measurement timer
         self.measurement_continue_timer = QtCore.QTimer()
-        self.measurement_finish_timer = QtCore.QTimer()
         self.measurement_continue_timer.timeout.connect(self.measurement_continue)
-        self.measurement_finish_timer.timeout.connect(self.measurement_finish)
 
         # Connect signals
         self.update_label_latency.connect(self.label_latency.setText)
         self.update_label_info.connect(self.label_info.setText)
         self.update_measurement_progress.connect(self.measurement_progress.setValue)
         self.measurement_continue_timer_start_signal.connect(self.measurement_continue_timer.start)
-        self.measurement_finish_timer_start_signal.connect(self.measurement_finish_timer.start)
         self.plot_on_graph_signal.connect(self.plot_data)
 
         # Initialize window combobox
@@ -165,123 +164,148 @@ class Window(QMainWindow):
             # Reset progress bar
             self.measurement_progress.setValue(0)
 
-            # Measure latency with tone
-            self.measurement_stage = MEASUREMENT_STAGE_LATENCY
-            self.audio_handler.measure_latency(self.update_label_latency,
-                                               self.update_label_info,
-                                               self.measurement_continue_timer_start_signal)
+            # Measure internal reference in sweep mode
+            if int(self.settings_handler.settings['signal_type']) == AudioHandler.TEST_SIGNAL_TYPE_SWEEP:
+                self.measurement_stage = MEASUREMENT_STAGE_REFERENCE
+                self.sweep_handler.start_measurement(self.update_label_info, self.update_measurement_progress,
+                                                     self.measurement_continue_timer_start_signal,
+                                                     self.plot_on_graph_signal, True)
+
+            # Measure latency
+            else:
+                # Open audio
+                self.audio_handler.open_audio(int(self.settings_handler.settings['audio_recording_channels']))
+
+                # Measure latency with tone
+                self.measurement_stage = MEASUREMENT_STAGE_LATENCY
+                self.audio_handler.measure_latency(self.update_label_latency,
+                                                   self.update_label_info,
+                                                   self.measurement_continue_timer_start_signal)
 
         # Stop button pressed
         elif self.btn_measurement_action == BTN_MEASUREMENT_ACTION_STOP:
             # Stop latency measurement
-            self.audio_handler.stop_measuring_latency()
+            if self.measurement_stage == MEASUREMENT_STAGE_LATENCY:
+                self.audio_handler.stop_measuring_latency()
 
             # Stop frequency response measurement
-            if int(self.settings_handler.settings['signal_type']) == AudioHandler.TEST_SIGNAL_TYPE_SWEEP:
-                self.sweep_handler.stop_measurement()
-            else:
-                self.noise_handler.stop_measurement()
-
-            # Stop all timers
-            self.measurement_continue_timer.stop()
-            self.measurement_finish_timer.stop()
+            elif self.measurement_stage == MEASUREMENT_STAGE_REFERENCE \
+                    or self.measurement_stage == MEASUREMENT_STAGE_FREQUENCY_RESPONSE:
+                if int(self.settings_handler.settings['signal_type']) == AudioHandler.TEST_SIGNAL_TYPE_SWEEP:
+                    self.sweep_handler.stop_measurement()
+                else:
+                    self.noise_handler.stop_measurement()
 
             # Go to final step
-            self.measurement_finish()
+            self.measurement_stage = MEASUREMENT_STAGE_IDLE
+            self.measurement_continue()
 
     def measurement_continue(self):
-        """
-        Step 2 - measure frequency responce
-        :return:
-        """
         # Stop timer
         self.measurement_continue_timer.stop()
 
-        # Clear info label
+        # Clear labels and progress bar
         self.label_info.setText('')
-
-        # Fatal error during latency measurement
-        if len(self.audio_handler.error_message) > 0:
-            # Show fatal error message
-            QMessageBox.critical(self, 'Fatal error',
-                                 'Fatal error during latency measurement!\nThe app will be closed!\n\n'
-                                 + str(self.audio_handler.error_message), QMessageBox.Ok)
-
-            # Kill all threads and exit
-            current_system_pid = os.getpid()
-            psutil.Process(current_system_pid).terminate()
-            QCoreApplication.exit(-1)
-
-        # Check latency
-        if self.audio_handler.audio_latency_chunks >= 0:
-            # Generate new plots
-            self.graph_plot_main.plots_prepare(int(self.settings_handler.settings['audio_recording_channels']))
-
-            # Start measurement
-            if int(self.settings_handler.settings['signal_type']) == AudioHandler.TEST_SIGNAL_TYPE_SWEEP:
-                self.sweep_handler.start_measurement(self.update_label_info, self.update_measurement_progress,
-                                                     self.measurement_finish_timer_start_signal,
-                                                     self.plot_on_graph_signal)
-            else:
-                self.noise_handler.start_measurement(self.update_label_info, self.update_measurement_progress,
-                                                     self.measurement_finish_timer_start_signal,
-                                                     self.plot_on_graph_signal)
-
-        # Error
-        else:
-            # Error message
-            QMessageBox.critical(self, 'Error', 'Failed to measure latency!\nCheck settings and try again')
-
-            # Enable controls
-            self.enable_controls()
-            self.btn_measurement_start.setText(BTN_MEASUREMENT_START_TEXT)
-            self.btn_measurement_action = BTN_MEASUREMENT_ACTION_START
-
-    def measurement_finish(self):
-        """
-        Measurement final stage
-        :return:
-        """
-        # Stop timer
-        self.measurement_finish_timer.stop()
-
-        # Clear info label
-        self.label_info.setText('')
-
-        # Reset progress bar
         self.measurement_progress.setValue(0)
 
-        # Get error message
-        if int(self.settings_handler.settings['signal_type']) == AudioHandler.TEST_SIGNAL_TYPE_SWEEP:
-            error_message = self.sweep_handler.error_message
-        else:
-            error_message = self.noise_handler.error_message
+        # Previous stage is internal reference measurement
+        if self.measurement_stage == MEASUREMENT_STAGE_REFERENCE:
+            # Reference measurement completed
+            if self.sweep_handler.meas_or_calib_completed:
+                # Open audio
+                self.audio_handler.open_audio(int(self.settings_handler.settings['audio_recording_channels']))
 
-        # Fatal error during frequency response measurement
-        if len(error_message) > 0:
-            # Show fatal error message
-            QMessageBox.critical(self, 'Fatal error',
-                                 'Fatal error during frequency response measurement!\nThe app will be closed!\n\n'
-                                 + error_message, QMessageBox.Ok)
+                # Measure latency
+                self.measurement_stage = MEASUREMENT_STAGE_LATENCY
+                self.audio_handler.measure_latency(self.update_label_latency,
+                                                   self.update_label_info,
+                                                   self.measurement_continue_timer_start_signal)
 
-            # Kill all threads and exit
-            current_system_pid = os.getpid()
-            psutil.Process(current_system_pid).terminate()
-            QCoreApplication.exit(-1)
+            # Reference measurement failed
+            elif self.sweep_handler.error_message != '':
+                self.show_error_message(self.sweep_handler.error_message)
+                self.measurement_stage = MEASUREMENT_STAGE_IDLE
 
-        else:
+            # Other?
+            else:
+                self.measurement_stage = MEASUREMENT_STAGE_IDLE
+
+        # Previous stage is latency measurement
+        elif self.measurement_stage == MEASUREMENT_STAGE_LATENCY:
+            # Check latency
+            if self.audio_handler.audio_latency_samples >= 0 and len(self.audio_handler.error_message) == 0:
+                # Generate new plots
+                self.graph_plot_main.plots_prepare(int(self.settings_handler.settings['audio_recording_channels']))
+
+                # Start measurement
+                self.measurement_stage = MEASUREMENT_STAGE_FREQUENCY_RESPONSE
+                if int(self.settings_handler.settings['signal_type']) == AudioHandler.TEST_SIGNAL_TYPE_SWEEP:
+                    self.sweep_handler.start_measurement(self.update_label_info, self.update_measurement_progress,
+                                                         self.measurement_continue_timer_start_signal,
+                                                         self.plot_on_graph_signal)
+                else:
+                    self.noise_handler.start_measurement(self.update_label_info, self.update_measurement_progress,
+                                                         self.measurement_continue_timer_start_signal,
+                                                         self.plot_on_graph_signal)
+
+            # Latency measurement failed
+            else:
+                self.show_error_message(self.audio_handler.error_message)
+                self.measurement_stage = MEASUREMENT_STAGE_IDLE
+
+        # Previous stage is frequency response measurement
+        elif self.measurement_stage == MEASUREMENT_STAGE_FREQUENCY_RESPONSE:
+            # Close audio
+            self.audio_handler.close_audio()
+
+            # Get error message
+            if int(self.settings_handler.settings['signal_type']) == AudioHandler.TEST_SIGNAL_TYPE_SWEEP:
+                error_message = self.sweep_handler.error_message
+            else:
+                error_message = self.noise_handler.error_message
+
+            # Fatal error during frequency response measurement
+            if len(error_message) > 0:
+                self.show_error_message(error_message)
+            else:
+                # Final message
+                signal_type = int(self.settings_handler.settings['signal_type'])
+                if (signal_type == AudioHandler.TEST_SIGNAL_TYPE_SWEEP and self.sweep_handler.meas_or_calib_completed) \
+                        or (signal_type == AudioHandler.TEST_SIGNAL_TYPE_NOISE
+                            and self.noise_handler.measurement_completed):
+                    QMessageBox.information(self, 'Done', 'Frequency response measurement completed!', QMessageBox.Ok)
+                    self.measurement_stage = MEASUREMENT_STAGE_IDLE
+
+            # Done
+            self.measurement_stage = MEASUREMENT_STAGE_IDLE
+
+        # IDLE stage - reset buttons
+        if self.measurement_stage == MEASUREMENT_STAGE_IDLE:
+            # Close audio
+            self.audio_handler.close_audio()
+
             # Enable controls
             self.enable_controls()
             self.btn_measurement_start.setText(BTN_MEASUREMENT_START_TEXT)
-
-            # Final message
-            signal_type = int(self.settings_handler.settings['signal_type'])
-            if (signal_type == AudioHandler.TEST_SIGNAL_TYPE_SWEEP and self.sweep_handler.measurement_completed) or \
-                    (signal_type == AudioHandler.TEST_SIGNAL_TYPE_NOISE and self.noise_handler.measurement_completed):
-                QMessageBox.information(self, 'Done', 'Frequency response measurement completed!', QMessageBox.Ok)
-
-            # Restore default button action
             self.btn_measurement_action = BTN_MEASUREMENT_ACTION_START
+
+    def show_error_message(self, error_message):
+        """
+        Shows error message dialog
+        :param error_message: exception message
+        :return:
+        """
+        stage_name = ''
+        if self.measurement_stage == MEASUREMENT_STAGE_REFERENCE:
+            stage_name = 'measure internal reference'
+        elif self.measurement_stage == MEASUREMENT_STAGE_LATENCY:
+            stage_name = 'latency'
+        elif self.measurement_stage == MEASUREMENT_STAGE_FREQUENCY_RESPONSE:
+            stage_name = 'frequency_response'
+
+        # Show message
+        QMessageBox.critical(self, 'Error', 'Failed to measure ' + stage_name + '!\nCheck settings or try again\n\n'
+                             + error_message, QMessageBox.Ok)
 
     def load_reference(self):
         """
@@ -377,6 +401,7 @@ class Window(QMainWindow):
         # Normalize checkboxes
         self.cbox_normalize.setChecked(self.settings_handler.settings['normalize_frequency_response'])
         self.cbox_normalize_reference.setChecked(self.settings_handler.settings['normalize_reference'])
+        self.cbox_normalize_to_save.setChecked(self.settings_handler.settings['normalize_to_save'])
 
         # Update charts
         self.graph_plot_main.init_chart(self.audio_handler.frequency_response_frequencies)
@@ -460,6 +485,7 @@ class Window(QMainWindow):
         # Normalize checkboxes
         self.settings_handler.settings['normalize_frequency_response'] = self.cbox_normalize.isChecked()
         self.settings_handler.settings['normalize_reference'] = self.cbox_normalize_reference.isChecked()
+        self.settings_handler.settings['normalize_to_save'] = self.cbox_normalize_to_save.isChecked()
 
         # Write new settings to file
         self.settings_handler.write_to_file()
@@ -519,7 +545,7 @@ class Window(QMainWindow):
                                                           self.cbox_normalize_reference.isChecked())
 
                 # Normalize?
-                if self.cbox_normalize.isChecked():
+                if self.cbox_normalize_to_save.isChecked():
                     levels = AudioHandler.normalize_data(levels)
 
                 # Save to file
