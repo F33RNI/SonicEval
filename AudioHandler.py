@@ -25,8 +25,8 @@ from PyQt5 import QtCore
 from ftfy import fix_encoding
 from scipy.signal import butter, lfilter, find_peaks
 
-# How long play silence (in chunks) before reopening audio devices
-SILENCE_BEFORE_MEASUREMENT_CHUNKS = 16
+# How long play silence (in chunks) before playing tone
+SILENCE_BEFORE_MEASUREMENT_CHUNKS = 64
 
 # Maximum latency (timeout threshold)
 MEASURE_LATENCY_MAX_LATENCY_CHUNKS = 64
@@ -443,7 +443,7 @@ class AudioHandler:
         """
         self.settings_handler = settings_handler
 
-        # Streams (for close function)
+        # Streams
         self.playback_stream = None
         self.recording_stream = None
 
@@ -466,6 +466,14 @@ class AudioHandler:
         self.chunk_size = 0
         self.stop_flag = False
 
+    def calculate_chunk_size(self, sample_rate):
+        """
+        Calculates chunk size by sample rate
+        :param sample_rate:
+        :return:
+        """
+        self.chunk_size = sample_rate_to_chunk_size(sample_rate)
+
     def open_audio(self, recording_channels: int):
         """
         Opens playback and recording streams
@@ -481,7 +489,7 @@ class AudioHandler:
         sample_rate = int(self.settings_handler.settings['audio_sample_rate'])
 
         # Calculate chunk size
-        self.chunk_size = sample_rate_to_chunk_size(sample_rate)
+        self.calculate_chunk_size(sample_rate)
 
         # Open playback stream
         self.playback_stream = self.py_audio.open(output_device_index=playback_device_index,
@@ -597,12 +605,15 @@ class AudioHandler:
             # Sample rate
             sample_rate = int(self.settings_handler.settings['audio_sample_rate'])
 
+            # Number of channels
+            recording_channels = int(self.settings_handler.settings['audio_recording_channels'])
+
             # FFT window
             window_type = int(self.settings_handler.settings['fft_window_type'])
 
             # Start latency measurement loop
             self.measure_latency_thread_running = True
-            latency_samples = self.measure_latency_loop(sample_rate, window_type)
+            latency_samples = self.measure_latency_loop(sample_rate, recording_channels, window_type)
             if latency_samples < 0 or self.stop_flag:
                 self.audio_latency_samples = -1
             else:
@@ -629,17 +640,15 @@ class AudioHandler:
             if self.measurement_timer_start_signal is not None:
                 self.measurement_timer_start_signal.emit(1)
 
-    def measure_latency_loop(self, sample_rate, window_type):
+    def measure_latency_loop(self, sample_rate, recording_channels, window_type):
         """
         Measures latency (in samples) between playback and recording
         TODO: Improve latency measurement
         :param sample_rate:
+        :param recording_channels:
         :param window_type:
         :return:
         """
-        # Open audio streams for the first time
-        playback_stream, recording_stream = self.open_audio(1)
-
         # Loop variables
         latency_samples = -1
         chunk_counter = 0
@@ -670,21 +679,11 @@ class AudioHandler:
                 phase += 2 * np.pi / test_frequency_samples
                 samples_buffer = np.append(samples_buffer, [sample])
 
-        # Play silence
-        if self.update_label_info is not None:
-            self.update_label_info.emit('Playing silence for ' + str(SILENCE_BEFORE_MEASUREMENT_CHUNKS) + ' chunks')
-        for _ in range(SILENCE_BEFORE_MEASUREMENT_CHUNKS):
-            output_bytes = array.array('f', samples_buffer_silence).tobytes()
-            playback_stream.write(output_bytes)
-            recording_stream.read(self.chunk_size)
-        # Close audio streams
-        self.close_audio()
-
-        # Open audio streams again
-        playback_stream, recording_stream = self.open_audio(1)
-
         # Generate window
         window = generate_window(window_type, self.chunk_size)
+
+        # Play silence
+        self.play_silence()
 
         signal_receiving_start = False
         while self.measure_latency_thread_running:
@@ -696,17 +695,25 @@ class AudioHandler:
                 output_bytes = array.array('f', samples_buffer_silence).tobytes()
 
             # Write to stream
-            playback_stream.write(output_bytes)
+            self.playback_stream.write(output_bytes)
 
-            # Read data (1 channel)
-            input_data_raw = recording_stream.read(self.chunk_size)
+            # Read data
+            input_data_raw = self.recording_stream.read(self.chunk_size)
             input_data = np.frombuffer(input_data_raw, dtype=np.float32)
 
+            # Split into channels and make mono
+            input_data = input_data.reshape((len(input_data) // recording_channels, recording_channels))
+            data_per_channels = np.split(input_data, recording_channels, axis=1)
+            input_data_mono = data_per_channels[0].flatten()
+            for channel_n in range(1, recording_channels):
+                input_data_mono = np.add(input_data_mono, data_per_channels[channel_n].flatten())
+            input_data_mono = np.divide(input_data_mono, recording_channels)
+
             # Append to recording buffer
-            recording_buffer = np.append(recording_buffer, input_data)
+            recording_buffer = np.append(recording_buffer, input_data_mono)
 
             # Compute FFT
-            fft_dbfs = compute_fft_dbfs(input_data, window, window_type)
+            fft_dbfs = compute_fft_dbfs(input_data_mono, window, window_type)
 
             # Mean of signal (dbfs)
             fft_mean = np.mean(fft_dbfs)
@@ -744,9 +751,6 @@ class AudioHandler:
                 latency_samples = -1
                 self.measure_latency_thread_running = False
                 break
-
-        # Close audio streams
-        self.close_audio()
 
         # If exited successfully
         if self.error_message == '':
@@ -803,6 +807,16 @@ class AudioHandler:
                     self.error_message = 'Cannot detect both phase changes'
 
         return latency_samples
+
+    def play_silence(self):
+        # Play silence
+        if self.update_label_info is not None:
+            self.update_label_info.emit('Playing silence for ' + str(SILENCE_BEFORE_MEASUREMENT_CHUNKS) + ' chunks...')
+        samples_buffer_silence = np.zeros(self.chunk_size, dtype=np.float)
+        for _ in range(SILENCE_BEFORE_MEASUREMENT_CHUNKS):
+            output_bytes = array.array('f', samples_buffer_silence).tobytes()
+            self.playback_stream.write(output_bytes)
+            self.recording_stream.read(self.chunk_size)
 
     def stop_measuring_latency(self):
         """
