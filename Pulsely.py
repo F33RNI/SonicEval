@@ -176,11 +176,18 @@ class Window(QMainWindow):
                 # Open audio
                 self.audio_handler.open_audio(int(self.settings_handler.settings['audio_recording_channels']))
 
-                # Measure latency with tone
-                self.measurement_stage = MEASUREMENT_STAGE_LATENCY
-                self.audio_handler.measure_latency(self.update_label_latency,
-                                                   self.update_label_info,
-                                                   self.measurement_continue_timer_start_signal)
+                # Error opening audio
+                if self.audio_handler.error_message != '':
+                    self.show_error_message(self.audio_handler.error_message)
+                    self.measurement_stage = MEASUREMENT_STAGE_IDLE
+
+                # No error
+                else:
+                    # Measure latency with tone
+                    self.measurement_stage = MEASUREMENT_STAGE_LATENCY
+                    self.audio_handler.measure_latency(self.update_label_latency,
+                                                       self.update_label_info,
+                                                       self.measurement_continue_timer_start_signal)
 
         # Stop button pressed
         elif self.btn_measurement_action == BTN_MEASUREMENT_ACTION_STOP:
@@ -215,11 +222,18 @@ class Window(QMainWindow):
                 # Open audio
                 self.audio_handler.open_audio(int(self.settings_handler.settings['audio_recording_channels']))
 
-                # Measure latency
-                self.measurement_stage = MEASUREMENT_STAGE_LATENCY
-                self.audio_handler.measure_latency(self.update_label_latency,
-                                                   self.update_label_info,
-                                                   self.measurement_continue_timer_start_signal)
+                # Error opening audio
+                if self.audio_handler.error_message != '':
+                    self.show_error_message(self.audio_handler.error_message)
+                    self.measurement_stage = MEASUREMENT_STAGE_IDLE
+
+                # No error
+                else:
+                    # Measure latency
+                    self.measurement_stage = MEASUREMENT_STAGE_LATENCY
+                    self.audio_handler.measure_latency(self.update_label_latency,
+                                                       self.update_label_info,
+                                                       self.measurement_continue_timer_start_signal)
 
             # Reference measurement failed
             elif self.sweep_handler.error_message != '':

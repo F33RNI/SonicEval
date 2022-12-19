@@ -483,32 +483,39 @@ class AudioHandler:
         :param recording_channels: number of channels to record
         :return: playback_stream, recording_stream
         """
-        playback_device_name = str(self.settings_handler.settings['audio_playback_interface'])
-        recording_device_name = str(self.settings_handler.settings['audio_recording_interface'])
-        playback_device_index = self.get_device_index_by_name(playback_device_name)
-        recording_device_index = self.get_device_index_by_name(recording_device_name)
+        try:
+            playback_device_name = str(self.settings_handler.settings['audio_playback_interface'])
+            recording_device_name = str(self.settings_handler.settings['audio_recording_interface'])
+            playback_device_index = self.get_device_index_by_name(playback_device_name)
+            recording_device_index = self.get_device_index_by_name(recording_device_name)
 
-        # Get sample rate
-        sample_rate = int(self.settings_handler.settings['audio_sample_rate'])
+            # Get sample rate
+            sample_rate = int(self.settings_handler.settings['audio_sample_rate'])
 
-        # Calculate chunk size
-        self.calculate_chunk_size(sample_rate)
+            # Calculate chunk size
+            self.calculate_chunk_size(sample_rate)
 
-        # Open playback stream
-        self.playback_stream = self.py_audio.open(output_device_index=playback_device_index,
-                                                  format=pyaudio.paFloat32,
-                                                  channels=1,
-                                                  frames_per_buffer=self.chunk_size,
-                                                  rate=sample_rate,
-                                                  output=True)
+            # Open playback stream
+            self.playback_stream = self.py_audio.open(output_device_index=playback_device_index,
+                                                      format=pyaudio.paFloat32,
+                                                      channels=1,
+                                                      frames_per_buffer=self.chunk_size,
+                                                      rate=sample_rate,
+                                                      output=True)
 
-        # Open recording stream
-        self.recording_stream = self.py_audio.open(input_device_index=recording_device_index,
-                                                   format=pyaudio.paFloat32,
-                                                   channels=recording_channels,
-                                                   frames_per_buffer=self.chunk_size,
-                                                   rate=sample_rate,
-                                                   input=True)
+            # Open recording stream
+            self.recording_stream = self.py_audio.open(input_device_index=recording_device_index,
+                                                       format=pyaudio.paFloat32,
+                                                       channels=recording_channels,
+                                                       frames_per_buffer=self.chunk_size,
+                                                       rate=sample_rate,
+                                                       input=True)
+        # Error during opening audio
+        except Exception as e:
+            traceback.print_exc()
+            self.error_message = str(e)
+            self.playback_stream = None
+            self.recording_stream = None
 
         # Return streams
         return self.playback_stream, self.recording_stream
