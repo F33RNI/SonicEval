@@ -726,7 +726,7 @@ class AudioHandler:
             fft_dbfs = compute_fft_dbfs(input_data_mono, window, window_type)
 
             # Mean of signal (dbfs)
-            fft_mean = np.mean(fft_dbfs)
+            fft_mean = np.average(fft_dbfs)
 
             # Real peak value and index
             fft_max = np.max(fft_dbfs)

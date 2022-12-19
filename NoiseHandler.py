@@ -196,7 +196,7 @@ class NoiseHandler:
                                                         TEST_SIGNAL_TYPE_NOISE)
 
                             # First run - initialize filter
-                            if np.mean(noise_result_dbfs[channel_n]) == -np.inf:
+                            if np.average(noise_result_dbfs[channel_n]) == -np.inf:
                                 noise_result_dbfs[channel_n] = fft_dbfs
 
                             # Filter data
@@ -209,7 +209,7 @@ class NoiseHandler:
                             fft_peak_hz_avg += index_to_frequency(
                                 np.where(fft_dbfs == max_peak)[0][0], sample_rate, data_length)
                             fft_peak_dbfs_avg += max_peak
-                            fft_mean_avg_dbfs_avg += np.mean(fft_dbfs)
+                            fft_mean_avg_dbfs_avg += np.average(fft_dbfs)
 
                         # Calculate average info
                         fft_peak_hz_avg /= recording_channels

@@ -309,7 +309,7 @@ class SweepHandler:
                             fft_in_range_peak_hz_avg += index_to_frequency(peak_index, sample_rate, data_length)
 
                             # Mean signal level
-                            fft_mean_avg_dbfs += np.mean(fft_dbfs)
+                            fft_mean_avg_dbfs += np.average(fft_dbfs)
 
                             # Add result to buffer
                             result_dbfs_buffer[channel_n] += peak_value
