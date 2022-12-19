@@ -22,12 +22,27 @@ import traceback
 import numpy as np
 import pyaudio
 from PyQt5 import QtCore
-from scipy.signal import butter, lfilter
+from ftfy import fix_encoding
+from scipy.signal import butter, lfilter, find_peaks
 
+# How long play silence (in chunks) before reopening audio devices
+SILENCE_BEFORE_MEASUREMENT_CHUNKS = 16
+
+# Maximum latency (timeout threshold)
 MEASURE_LATENCY_MAX_LATENCY_CHUNKS = 64
+
+# Volume to play while detecting latency
 MEASURE_LATENCY_VOLUME = 0.8
-MEASURE_LATENCY_FREQ_1 = 1000.
-MEASURE_LATENCY_FREQ_2 = 440.
+
+# Accepted frequency deviation while detecting signal for the first time
+MEASURE_LATENCY_ACCEPTED_DEVIATION_HZ = 100.
+
+# Accepted volume range while detecting latency
+MEASURE_LATENCY_MIN_VOLUME = .07
+MEASURE_LATENCY_MAX_VOLUME = .9
+
+# What can be the maximum allowable difference between the two measured latencies
+MEASURE_LATENCY_MAX_TOLERANCE_SAMPLES = 5
 
 # Defines
 DEVICE_TYPE_INPUT = 0
@@ -38,8 +53,10 @@ WINDOW_TYPE_NONE = 0
 WINDOW_TYPE_HAMMING = 1
 WINDOW_TYPE_HANNING = 2
 WINDOW_TYPE_BLACKMAN = 3
-MEASURE_LATENCY_STAGE_FREQ_1 = 0
-MEASURE_LATENCY_STAGE_FREQ_2 = 1
+MEASURE_LATENCY_STAGE_1 = 0
+MEASURE_LATENCY_STAGE_2 = 1
+MEASURE_LATENCY_STAGE_3 = 2
+MEASURE_LATENCY_STAGE_4 = 3
 POSITION_EQUAL = 0
 POSITION_ON_LEFT = 1
 POSITION_ON_RIGHT = 2
@@ -358,6 +375,66 @@ def clamp(n, min_, max_):
     return max(min(max_, n), min_)
 
 
+def is_all_frequencies_accepted(frequency_list, expected_frequency):
+    """
+    Checks if all elements in given list is deviated from expected_frequency no more than
+    MEASURE_LATENCY_ACCEPTED_DEVIATION_HZ
+    :param frequency_list:
+    :param expected_frequency:
+    :return:
+    """
+    list_accepted = True
+    for frequency in frequency_list:
+        if abs(frequency - expected_frequency) > MEASURE_LATENCY_ACCEPTED_DEVIATION_HZ:
+            list_accepted = False
+            break
+    return list_accepted
+
+
+def find_phase_changes_by_peaks(samples, peaks_indexes, test_frequency_samples, positive=True):
+    """
+    Finds index in samples array where phase changes
+    :param samples: audio samples
+    :param peaks_indexes: indexes of peaks
+    :param test_frequency_samples: test frequency period
+    :param positive: positive or negative peaks (for calculating volume)
+    :return:
+    """
+    # Average distance between peaks in samples
+    peaks_diff_avg = np.average(np.diff(peaks_indexes))
+    peak_sample_n_last = -math.inf
+
+    phase_changes_sample_n = []
+    phase_changes_volume = []
+
+    for sample_n in peaks_indexes:
+        distance = sample_n - peak_sample_n_last
+        deviation = distance - peaks_diff_avg
+        if test_frequency_samples / 4 < deviation < test_frequency_samples * 2:
+            gap_start_index = sample_n - distance
+            gap_stop_index = sample_n
+
+            volume_gap_avg = 0
+            for check_index in range(int(gap_start_index), int(gap_stop_index)):
+                sample = samples[check_index]
+                if positive:
+                    if sample > 0.:
+                        volume_gap_avg += sample
+
+                else:
+                    if sample < 0.:
+                        volume_gap_avg += abs(sample)
+
+            volume_gap_avg /= distance
+
+            phase_changes_sample_n.append(int(sample_n - distance / 2))
+            phase_changes_volume.append(volume_gap_avg)
+
+        peak_sample_n_last = sample_n
+
+    return phase_changes_sample_n, phase_changes_volume
+
+
 class AudioHandler:
     def __init__(self, settings_handler):
         """
@@ -382,11 +459,12 @@ class AudioHandler:
         self.error_message = ''
         self.py_audio = None
         self.measure_latency_thread_running = False
-        self.audio_latency_chunks = -1
+        self.audio_latency_samples = -1
         self.label_latency_update_signal = None
         self.update_label_info = None
         self.measurement_timer_start_signal = None
         self.chunk_size = 0
+        self.stop_flag = False
 
     def open_audio(self, recording_channels: int):
         """
@@ -457,7 +535,8 @@ class AudioHandler:
         for i in range(0, info.get('deviceCount')):
             if (self.py_audio.get_device_info_by_host_api_device_index(0, i)
                     .get('maxInputChannels' if device_type == DEVICE_TYPE_INPUT else 'maxOutputChannels')) > 0:
-                devices_names.append(self.py_audio.get_device_info_by_host_api_device_index(0, i).get('name'))
+                devices_names.append(fix_encoding(
+                    self.py_audio.get_device_info_by_host_api_device_index(0, i).get('name')))
 
         return devices_names
 
@@ -474,11 +553,12 @@ class AudioHandler:
             device_count = info.get('deviceCount')
             for i in range(0, device_count):
                 device = self.py_audio.get_device_info_by_host_api_device_index(0, i)
-                if device_name.lower() in str(device.get('name')).lower():
+                if device_name.lower() in str(fix_encoding(device.get('name'))).lower():
                     return device.get('index')
 
         except Exception as e:
             print(e)
+            traceback.print_exc()
 
         return 0
 
@@ -500,124 +580,41 @@ class AudioHandler:
         self.error_message = ''
 
         # Start measuring latency loop
-        self.measure_latency_thread_running = True
-        threading.Thread(target=self.measure_latency_loop).start()
+        threading.Thread(target=self.measure_latency_thread).start()
 
-    def measure_latency_loop(self):
+    def measure_latency_thread(self):
         """
-        Measures latency in chunks between playback and receive
+        Measures latency several times to check result
         :return:
         """
         try:
-            # Loop variables
-            phase = 0
-            chunks_counter = 0
-            chunks_counter_timeout = 0
-            measure_latency_stage = MEASURE_LATENCY_STAGE_FREQ_1
-            measure_latency_started = False
-
-            # Open audio streams
-            playback_stream, recording_stream = self.open_audio(1)
+            # Clear stop flag
+            self.stop_flag = False
 
             # Reset latency
-            self.audio_latency_chunks = -1
+            self.audio_latency_samples = -1
 
             # Sample rate
             sample_rate = int(self.settings_handler.settings['audio_sample_rate'])
 
             # FFT window
             window_type = int(self.settings_handler.settings['fft_window_type'])
-            window = generate_window(window_type, self.chunk_size)
 
-            # Data buffer (floats)
-            samples = np.zeros(self.chunk_size, dtype=np.float)
-
-            while self.measure_latency_thread_running:
-                # Current frequency
-                if measure_latency_stage == MEASURE_LATENCY_STAGE_FREQ_1:
-                    frequency = MEASURE_LATENCY_FREQ_1
-                elif measure_latency_stage == MEASURE_LATENCY_STAGE_FREQ_2:
-                    frequency = MEASURE_LATENCY_FREQ_2
-                else:
-                    break
-
-                # Fill buffer with sine wave
-                for sample in range(self.chunk_size):
-                    samples[sample] = MEASURE_LATENCY_VOLUME * np.sin(phase)
-                    phase += 2 * np.pi * frequency / sample_rate
-
-                # Convert to bytes
-                output_bytes = array.array('f', samples).tobytes()
-
-                # Write to stream
-                playback_stream.write(output_bytes)
-
-                # Read data (1 channel)
-                input_data_raw = recording_stream.read(self.chunk_size)
-                input_data = np.frombuffer(input_data_raw, dtype=np.float32)
-
-                # Compute FFT
-                fft_dbfs = compute_fft_dbfs(input_data, window, window_type)
-
-                # Mean of signal (dbfs)
-                fft_mean = np.mean(fft_dbfs)
-
-                # Real peak value and index
-                fft_max = np.max(fft_dbfs)
-                fft_max_index = np.where(fft_dbfs == fft_max)[0][0]
-
-                # Expected index of peak
-                fft_max_expected_index = frequency_to_index(frequency, sample_rate, len(input_data))
-
-                # Expected frequency is detected
-                if abs(fft_mean) / abs(fft_max) > 2 and abs(fft_max_index - fft_max_expected_index) < 5.:
-                    # Detected 1st frequency -> start counting
-                    if measure_latency_stage == MEASURE_LATENCY_STAGE_FREQ_1:
-                        measure_latency_started = True
-
-                    # Detected 2nd frequency -> stop counting and exit
-                    elif measure_latency_stage == MEASURE_LATENCY_STAGE_FREQ_2:
-                        # Stop counter
-                        measure_latency_started = False
-
-                        # Store measured latency
-                        self.audio_latency_chunks = chunks_counter
-
-                        # Exit
-                        self.measure_latency_thread_running = False
-
-                    # Increment stage
-                    measure_latency_stage += 1
-
-                # Count latency in chunks
-                if measure_latency_started:
-                    chunks_counter += 1
-
-                # Show info message
-                if self.update_label_info is not None:
-                    self.update_label_info.emit('Playing frequency: ' + str(frequency)
-                                                + ' Hz, Reading: ' + str(int(fft_dbfs[fft_max_expected_index]))
-                                                + ' dBFS, Latency: ' + str(chunks_counter * self.chunk_size)
-                                                + ' samples')
-
-                # Timeout error measuring latency
-                chunks_counter_timeout += 1
-                if chunks_counter_timeout >= MEASURE_LATENCY_MAX_LATENCY_CHUNKS:
-                    self.audio_latency_chunks = -1
-                    self.measure_latency_thread_running = False
-                    break
-
-            # Close audio streams
-            self.close_audio()
+            # Start latency measurement loop
+            self.measure_latency_thread_running = True
+            latency_samples = self.measure_latency_loop(sample_rate, window_type)
+            if latency_samples < 0 or self.stop_flag:
+                self.audio_latency_samples = -1
+            else:
+                self.audio_latency_samples = latency_samples
 
             # Display measured latency
             if self.label_latency_update_signal is not None:
-                if self.audio_latency_chunks >= 0:
+                if self.audio_latency_samples >= 0:
                     self.label_latency_update_signal.emit('Latency: ' +
-                                                          str(self.audio_latency_chunks * self.chunk_size) +
-                                                          ' samples (' + str(round(self.audio_latency_chunks
-                                                                                   * self.chunk_size
-                                                                                   / sample_rate * 1000, 2)) + ' ms)')
+                                                          str(self.audio_latency_samples) + ' samples ('
+                                                          + str(round(self.audio_latency_samples
+                                                                      / sample_rate * 1000, 2)) + ' ms)')
                 else:
                     self.label_latency_update_signal.emit('Failed to measure latency!')
 
@@ -632,17 +629,195 @@ class AudioHandler:
             if self.measurement_timer_start_signal is not None:
                 self.measurement_timer_start_signal.emit(1)
 
+    def measure_latency_loop(self, sample_rate, window_type):
+        """
+        Measures latency (in samples) between playback and recording
+        TODO: Improve latency measurement
+        :param sample_rate:
+        :param window_type:
+        :return:
+        """
+        # Open audio streams for the first time
+        playback_stream, recording_stream = self.open_audio(1)
+
+        # Loop variables
+        latency_samples = -1
+        chunk_counter = 0
+
+        # Recording buffer to store all samples for future analysis
+        recording_buffer = np.empty(0, dtype=np.float)
+
+        # Frequency
+        test_frequency_samples = self.chunk_size / 16
+
+        # Generate samples:
+        # chunk_size * 0 - 1: test_frequency_samples
+        # phase change
+        # chunk_size * 2 - 3: test_frequency_samples
+        # phase change
+        # chunk_size * 4 - 5: test_frequency_samples
+        samples_buffer = np.empty(0, dtype=np.float)
+        samples_buffer_silence = np.zeros(self.chunk_size, dtype=np.float)
+        phase = 0
+        for sample_chunk_n in range(6):
+            # Invert phase 2 times
+            if sample_chunk_n == 2 or sample_chunk_n == 4:
+                phase += np.pi
+
+            # Fill buffer with sine wave
+            for sample in range(self.chunk_size):
+                sample = MEASURE_LATENCY_VOLUME * np.sin(phase)
+                phase += 2 * np.pi / test_frequency_samples
+                samples_buffer = np.append(samples_buffer, [sample])
+
+        # Play silence
+        if self.update_label_info is not None:
+            self.update_label_info.emit('Playing silence for ' + str(SILENCE_BEFORE_MEASUREMENT_CHUNKS) + ' chunks')
+        for _ in range(SILENCE_BEFORE_MEASUREMENT_CHUNKS):
+            output_bytes = array.array('f', samples_buffer_silence).tobytes()
+            playback_stream.write(output_bytes)
+            recording_stream.read(self.chunk_size)
+        # Close audio streams
+        self.close_audio()
+
+        # Open audio streams again
+        playback_stream, recording_stream = self.open_audio(1)
+
+        # Generate window
+        window = generate_window(window_type, self.chunk_size)
+
+        signal_receiving_start = False
+        while self.measure_latency_thread_running:
+            # Convert to bytes
+            if chunk_counter * self.chunk_size < len(samples_buffer) - 2:
+                output_bytes = array.array('f', samples_buffer[self.chunk_size * chunk_counter:
+                                                               self.chunk_size * (chunk_counter + 1)]).tobytes()
+            else:
+                output_bytes = array.array('f', samples_buffer_silence).tobytes()
+
+            # Write to stream
+            playback_stream.write(output_bytes)
+
+            # Read data (1 channel)
+            input_data_raw = recording_stream.read(self.chunk_size)
+            input_data = np.frombuffer(input_data_raw, dtype=np.float32)
+
+            # Append to recording buffer
+            recording_buffer = np.append(recording_buffer, input_data)
+
+            # Compute FFT
+            fft_dbfs = compute_fft_dbfs(input_data, window, window_type)
+
+            # Mean of signal (dbfs)
+            fft_mean = np.mean(fft_dbfs)
+
+            # Real peak value and index
+            fft_max = np.max(fft_dbfs)
+            fft_max_index = np.where(fft_dbfs == fft_max)[0][0]
+            fft_max_frequency_hz = index_to_frequency(fft_max_index, sample_rate, self.chunk_size)
+            expected_frequency_hz = sample_rate / test_frequency_samples
+
+            # Print info
+            if self.update_label_info is not None:
+                self.update_label_info.emit('Mean level: ' + str(int(fft_mean)) + ' dBFS, Peak level: '
+                                            + str(int(fft_max)) + ' dBFS, Expected f: '
+                                            + str(int(fft_max_frequency_hz)) + ' Hz')
+
+            # Detect that recording started
+            if fft_max / fft_mean < 0.5 \
+                    and abs(expected_frequency_hz - fft_max_frequency_hz) < MEASURE_LATENCY_ACCEPTED_DEVIATION_HZ:
+                if not signal_receiving_start:
+                    signal_receiving_start = True
+
+            # Exit if no more signal
+            elif signal_receiving_start:
+                self.measure_latency_thread_running = False
+                break
+
+            # Count chunks
+            chunk_counter += 1
+
+            # Timeout error measuring latency
+            if chunk_counter >= MEASURE_LATENCY_MAX_LATENCY_CHUNKS:
+                self.error_message = 'Timeout error (no signal detected in ' \
+                                     + str(MEASURE_LATENCY_MAX_LATENCY_CHUNKS) + ' chunks)'
+                latency_samples = -1
+                self.measure_latency_thread_running = False
+                break
+
+        # Close audio streams
+        self.close_audio()
+
+        # If exited successfully
+        if self.error_message == '':
+            # Measure peak volume
+            volume = (abs(np.min(recording_buffer)) + abs(np.max(recording_buffer))) / 2
+
+            # Check volume
+            if volume < MEASURE_LATENCY_MIN_VOLUME:
+                self.error_message = 'Volume too low'
+            elif volume > MEASURE_LATENCY_MAX_VOLUME:
+                self.error_message = 'Volume too high'
+            else:
+                # Find signal peaks
+                peaks_positive, _ = find_peaks(recording_buffer, height=(volume / 2, volume * 2))
+                peaks_negative, _ = find_peaks(-recording_buffer, height=(volume / 2, volume * 2))
+
+                # Find phase changes
+                phase_changes_positive_sample_n, phase_changes_positive_lvl \
+                    = find_phase_changes_by_peaks(recording_buffer, peaks_positive, test_frequency_samples, True)
+                phase_changes_negative_sample_n, phase_changes_negative_lvl \
+                    = find_phase_changes_by_peaks(recording_buffer, peaks_negative, test_frequency_samples, False)
+
+                # Check if there is both phase changes
+                if len(phase_changes_positive_sample_n) > 0 and len(phase_changes_negative_sample_n):
+                    # Find latencies by lowest volume in gap
+                    latency_positive = phase_changes_positive_sample_n[
+                        np.where(phase_changes_positive_lvl == np.min(phase_changes_positive_lvl))[0][0]]
+                    latency_negative = phase_changes_negative_sample_n[
+                        np.where(phase_changes_negative_lvl == np.min(phase_changes_negative_lvl))[0][0]]
+
+                    # Phase independent latencies (one is chunk_size * 2 off from other)
+                    latency_lower = min(latency_positive, latency_negative)
+                    latency_upper = max(latency_positive, latency_negative)
+
+                    # Subtract chunk_size * 2 from largest latency
+                    latency_upper -= self.chunk_size * 2
+
+                    # Subtract waves buffer from both latencies. After that we have real latencies
+                    latency_lower -= self.chunk_size * 2
+                    latency_upper -= self.chunk_size * 2
+
+                    # Finally, check them
+                    if abs(latency_lower - latency_upper) <= MEASURE_LATENCY_MAX_TOLERANCE_SAMPLES:
+                        # Calculate final latency
+                        latency_samples = int((latency_lower + latency_upper) / 2)
+
+                        # Check sign
+                        if latency_samples < 0:
+                            latency_samples = -1
+                            self.error_message = 'Measured latency is negative'
+                    else:
+                        self.error_message = 'Measured latencies are not equal'
+                else:
+                    self.error_message = 'Cannot detect both phase changes'
+
+        return latency_samples
+
     def stop_measuring_latency(self):
         """
         Stops measuring latency
         :return:
         """
+        # Set stop flag
+        self.stop_flag = True
+
         if self.measure_latency_thread_running:
             # Stop loop
             self.measure_latency_thread_running = False
 
             # Reset latency
-            self.audio_latency_chunks = -1
+            self.audio_latency_samples = -1
 
             # Display message
             if self.label_latency_update_signal is not None:
