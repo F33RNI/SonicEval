@@ -169,7 +169,7 @@ class SweepHandler:
             window = generate_window(window_type, chunk_size * fft_size_chunks)
 
             # Buffer of frequency indexes (for delay)
-            frequency_indexes_buffer = np.zeros(latency_chunks + 1, dtype=np.int)
+            frequency_indexes_buffer = np.zeros(latency_chunks + 1, dtype=np.int32)
 
             # Sine wave phase
             phase = 0
