@@ -21,7 +21,6 @@ import traceback
 
 import numpy as np
 from PyQt5 import QtCore
-from matplotlib import pyplot as plt
 
 from AudioHandler import generate_window, compute_fft_dbfs, frequency_to_index, index_to_frequency, clamp
 
