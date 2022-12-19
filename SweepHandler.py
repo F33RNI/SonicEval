@@ -21,6 +21,7 @@ import traceback
 
 import numpy as np
 from PyQt5 import QtCore
+from matplotlib import pyplot as plt
 
 from AudioHandler import generate_window, compute_fft_dbfs, frequency_to_index, index_to_frequency, clamp
 
@@ -46,7 +47,7 @@ class SweepHandler:
         self.update_measurement_progress = None
         self.measurement_timer_start_signal = None
         self.graph_curves = []
-        self.measurement_completed = False
+        self.meas_or_calib_completed = False
         self.internal_reference_dbfs = []
         self.stop_flag = False
 
@@ -56,6 +57,9 @@ class SweepHandler:
         :return:
         """
         sample_rate = int(self.settings_handler.settings['audio_sample_rate'])
+
+        # Calculate chunk size
+        self.audio_handler.calculate_chunk_size(sample_rate)
 
         # Calculate number of points
         one_sample_duration_s = 1. / float(sample_rate)
@@ -87,13 +91,14 @@ class SweepHandler:
     def start_measurement(self, update_label_info: QtCore.pyqtSignal,
                           update_measurement_progress: QtCore.pyqtSignal,
                           measurement_timer_start_signal: QtCore.pyqtSignal,
-                          plot_on_graph_signal: QtCore.pyqtSignal):
+                          plot_on_graph_signal: QtCore.pyqtSignal, internal_calibration=False):
         """
         Starts sweep_loop
         :param update_label_info:
         :param update_measurement_progress:
         :param measurement_timer_start_signal:
         :param plot_on_graph_signal:
+        :param internal_calibration:
         :return:
         """
         self.update_label_info = update_label_info
@@ -108,31 +113,28 @@ class SweepHandler:
         self.error_message = ''
 
         # Clear flag
-        self.measurement_completed = False
+        self.meas_or_calib_completed = False
 
         # Get settings and other constants
         chunk_size = self.audio_handler.chunk_size
-        playback_device_name = str(self.settings_handler.settings['audio_playback_interface'])
-        recording_device_name = str(self.settings_handler.settings['audio_recording_interface'])
         sample_rate = int(self.settings_handler.settings['audio_sample_rate'])
         volume = int(self.settings_handler.settings['audio_playback_volume']) / 100.
         recording_channels = int(self.settings_handler.settings['audio_recording_channels'])
         fft_size_chunks = int(self.settings_handler.settings['fft_size_chunks'])
         window_type = int(self.settings_handler.settings['fft_window_type'])
-        latency_chunks = self.audio_handler.audio_latency_chunks
+        latency_samples = self.audio_handler.audio_latency_samples
 
         # Clear stop flag
         self.stop_flag = False
 
         # Start sweep loop as thread
         self.sweep_thread_running = True
-        threading.Thread(target=self.sweep_loop, args=(chunk_size, playback_device_name, recording_device_name,
-                                                       sample_rate, volume, recording_channels,
-                                                       fft_size_chunks, window_type, latency_chunks,)).start()
+        threading.Thread(target=self.sweep_loop, args=(chunk_size, sample_rate, volume, recording_channels,
+                                                       fft_size_chunks, window_type, latency_samples,
+                                                       internal_calibration,)).start()
 
-    def sweep_loop(self, chunk_size, playback_device_name, recording_device_name,
-                   sample_rate, volume, recording_channels,
-                   fft_size_chunks, window_type, latency_chunks, internal_calibration=False):
+    def sweep_loop(self, chunk_size, sample_rate, volume, recording_channels,
+                   fft_size_chunks, window_type, latency_samples, internal_calibration=False):
         """
         Measures frequency response by sweeping frequencies
         :return:
@@ -143,30 +145,32 @@ class SweepHandler:
                 return
 
             # Perform internal calibration
-            playback_stream = None
-            recording_stream = None
-            if not internal_calibration:
-                self.sweep_loop(chunk_size, playback_device_name, recording_device_name, sample_rate, volume,
-                                recording_channels, fft_size_chunks, window_type, latency_chunks, True)
-                self.sweep_thread_running = True
+            # if not internal_calibration:
+            #    self.sweep_loop(chunk_size, sample_rate, volume,
+            #                     recording_channels, fft_size_chunks, window_type, latency_samples, True)
+            #    self.sweep_thread_running = True
 
-                # Open audio streams after internal calibration
-                playback_stream, recording_stream = self.audio_handler.open_audio(recording_channels)
+            # Calculate latency
+            if not internal_calibration:
+                latency_chunks = (latency_samples // chunk_size) + 1
+                latency_samples_offset = chunk_size - int(latency_samples % chunk_size)
+            else:
+                latency_chunks = 0
+                latency_samples_offset = 0
 
             # Counters
             chunks_n = 0
             sweep_frequencies_position = 0
-            latency_chunk_counter = 0
-            input_data_buffer_position = 0
+            fft_buffer_position = 0
 
             # Delay buffer for internal_calibration mode
-            samples_delay_buffer = np.zeros(chunk_size * latency_chunks, dtype=np.float)
+            calibration_delay_buffer = np.zeros(chunk_size * (latency_chunks + 1), dtype=np.float)
 
             # FFT window
             window = generate_window(window_type, chunk_size * fft_size_chunks)
 
             # Buffer of frequency indexes (for delay)
-            frequency_indexes_buffer = np.zeros(latency_chunks, dtype=np.int)
+            frequency_indexes_buffer = np.zeros(latency_chunks + 1, dtype=np.int)
 
             # Sine wave phase
             phase = 0
@@ -178,9 +182,13 @@ class SweepHandler:
             # Playback data buffer (floats)
             samples = np.zeros(chunk_size, dtype=np.float)
 
+            # Buffer to increase delay to fil into full chunk
+            input_data_offset_buffer = np.zeros((chunk_size + latency_samples_offset) * recording_channels,
+                                                dtype=np.float)
+
             # Recording data buffer (floats)
-            input_data_buffer = np.zeros(chunk_size * fft_size_chunks * recording_channels,
-                                         dtype=np.float)
+            fft_buffer = np.zeros(chunk_size * fft_size_chunks * recording_channels,
+                                  dtype=np.float)
 
             # Resulted data (per channel)
             sweep_result_dbfs = np.empty((recording_channels, 0), dtype=np.float)
@@ -195,6 +203,7 @@ class SweepHandler:
 
             while self.sweep_thread_running and not self.stop_flag:
                 # Current frequency
+                # sweep_frequencies_position = int(np.random.random(1)[0] * (len(self.sweep_frequencies) - 1))
                 frequency = self.sweep_frequencies[sweep_frequencies_position]
 
                 # Rotate and fill frequency indexes buffer
@@ -212,36 +221,54 @@ class SweepHandler:
                     output_bytes = array.array('f', samples).tobytes()
 
                     # Write to stream
-                    playback_stream.write(output_bytes)
+                    self.audio_handler.playback_stream.write(output_bytes)
 
                     # Read data
-                    input_data_raw = recording_stream.read(chunk_size)
+                    input_data_raw = self.audio_handler.recording_stream.read(chunk_size)
                     input_data = np.frombuffer(input_data_raw, dtype=np.float32)
+
+                    # Write new data to the end of the buffer
+                    input_data_offset_buffer[-chunk_size * recording_channels:] = input_data
+
+                    # Move to the left, 
+                    # so new tails will be moves to the buffer start and buffer start to the chunk start
+                    input_data_offset_buffer \
+                        = np.roll(input_data_offset_buffer, latency_samples_offset * recording_channels)
+
+                    # Get delayed data from buffer end
+                    input_data_ = input_data_offset_buffer[-chunk_size * recording_channels:]
 
                 # Pass samples to input_data with delay in internal_calibration mode (simulate latency)
                 else:
-                    samples_delay_buffer = np.roll(samples_delay_buffer, chunk_size)
-                    samples_delay_buffer[0: chunk_size] = samples
-                    input_data = np.reshape([samples_delay_buffer[len(samples_delay_buffer) - chunk_size:]]
-                                            * recording_channels, chunk_size * recording_channels, order='F')
+                    # Simulate chunks delay
+                    calibration_delay_buffer = np.roll(calibration_delay_buffer, chunk_size)
+                    calibration_delay_buffer[0: chunk_size] = samples
+                    input_data_ = np.reshape([calibration_delay_buffer[len(calibration_delay_buffer) - chunk_size:]]
+                                             * recording_channels, chunk_size * recording_channels, order='F')
 
                 # Delay reached
-                if latency_chunk_counter >= latency_chunks - 1:
+                if chunks_n >= latency_chunks:
                     # Fill measurement buffer
-                    input_data_buffer[input_data_buffer_position:
-                                      input_data_buffer_position + chunk_size * recording_channels] \
-                        = input_data
-                    input_data_buffer_position += chunk_size * recording_channels
+                    fft_buffer[fft_buffer_position:
+                               fft_buffer_position + chunk_size * recording_channels] = input_data_
+                    fft_buffer_position += chunk_size * recording_channels
+
+                    """
+                    fft_dbfs = compute_fft_dbfs(input_data_, generate_window(window_type, chunk_size), window_type)
+                    fft_actual_peak = index_to_frequency(np.where(fft_dbfs == np.max(fft_dbfs))[0][0], sample_rate, chunk_size)
+                    frequency_delayed = self.sweep_frequencies[frequency_indexes_buffer[-1]]
+                    print(fft_actual_peak, frequency_delayed)
+                    """
 
                     # Measurement buffer is full
-                    if input_data_buffer_position == chunk_size * fft_size_chunks * recording_channels:
+                    if fft_buffer_position == chunk_size * fft_size_chunks * recording_channels:
                         # Reset measurement buffer position
-                        input_data_buffer_position = 0
+                        fft_buffer_position = 0
 
                         # Split into channels
-                        input_data = input_data_buffer.reshape((len(input_data_buffer) // recording_channels,
-                                                                recording_channels))
-                        data_per_channels = np.split(input_data, recording_channels, axis=1)
+                        input_data_ = fft_buffer.reshape((len(fft_buffer) // recording_channels,
+                                                          recording_channels))
+                        data_per_channels = np.split(input_data_, recording_channels, axis=1)
 
                         # Info data
                         fft_actual_peak_hz_avg = 0
@@ -291,8 +318,7 @@ class SweepHandler:
                             # Exit?
                             if frequency_indexes_buffer[-1] == len(self.sweep_frequencies) - 1:
                                 self.sweep_thread_running = False
-                                if not internal_calibration:
-                                    self.measurement_completed = True
+                                self.meas_or_calib_completed = True
 
                         # Calculate average info
                         fft_actual_peak_hz_avg /= recording_channels
@@ -303,7 +329,7 @@ class SweepHandler:
                         frequency_last_played_counter += 1
 
                         # If frequency has changed or it was last frequency
-                        if frequency_delayed != frequency_last or self.measurement_completed:
+                        if frequency_delayed != frequency_last or self.meas_or_calib_completed:
                             # Append avg level to final result
                             sweep_result_dbfs = \
                                 np.append(sweep_result_dbfs,
@@ -363,11 +389,6 @@ class SweepHandler:
                                 self.update_measurement_progress.emit(
                                     int((frequency_indexes_buffer[-1] / (len(self.sweep_frequencies) - 1)) * 10.))
 
-                # Wait for delay
-                else:
-                    # Increment delay counter
-                    latency_chunk_counter += 1
-
                 # Increment chunk counter
                 chunks_n += 1
 
@@ -380,17 +401,12 @@ class SweepHandler:
             if self.update_label_info is not None:
                 self.update_label_info.emit('')
 
-            # Regular mode
-            if not internal_calibration:
-                # Close audio streams
-                self.audio_handler.close_audio()
-
-                # Start exit timer
-                if self.measurement_timer_start_signal is not None:
-                    self.measurement_timer_start_signal.emit(1)
+            # Start exit timer
+            if self.measurement_timer_start_signal is not None:
+                self.measurement_timer_start_signal.emit(1)
 
             # Save internal calibration
-            else:
+            if internal_calibration:
                 self.internal_reference_dbfs = sweep_result_dbfs
 
         # Error during sweep

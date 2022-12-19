@@ -90,7 +90,11 @@ class NoiseHandler:
             fft_size_chunks = int(self.settings_handler.settings['fft_size_chunks'])
             noise_filter_order = int(self.settings_handler.settings['noise_filter_order'])
             np.random.seed(int(self.settings_handler.settings['noise_random_seed']))
-            latency_chunks = self.audio_handler.audio_latency_chunks
+            latency_samples = self.audio_handler.audio_latency_samples
+
+            # Calculate latency buffer sizes
+            latency_chunks = (latency_samples // chunk_size) + 1
+            latency_samples_offset = chunk_size - int(latency_samples % chunk_size)
 
             # Calculate signal duration in chunks
             signal_duration_chunks = (signal_duration_s * sample_rate) // chunk_size
@@ -99,12 +103,16 @@ class NoiseHandler:
             fft_window_type = int(self.settings_handler.settings['fft_window_type'])
             window = generate_window(fft_window_type, chunk_size * fft_size_chunks)
 
+            # Buffer to increase delay to fil into full chunk
+            input_data_offset_buffer = np.zeros((chunk_size + latency_samples_offset) * recording_channels,
+                                                dtype=np.float)
+
             # Recording data buffer (floats)
-            input_data_buffer = np.zeros(chunk_size * fft_size_chunks * recording_channels,
+            fft_buffer = np.zeros(chunk_size * fft_size_chunks * recording_channels,
                                          dtype=np.float)
 
             # Counters
-            input_data_buffer_position = 0
+            fft_buffer_position = 0
             latency_chunk_counter = 0
             chunk_counter = 0
 
@@ -145,21 +153,31 @@ class NoiseHandler:
                 input_data_raw = recording_stream.read(chunk_size)
                 input_data = np.frombuffer(input_data_raw, dtype=np.float32)
 
+                # Write new data to the end of the buffer
+                input_data_offset_buffer[-chunk_size * recording_channels:] = input_data
+
+                # Move to the left,
+                # so new tails will be moves to the buffer start and buffer start to the chunk start
+                input_data_offset_buffer \
+                    = np.roll(input_data_offset_buffer, latency_samples_offset * recording_channels)
+
+                # Get delayed data from buffer end
+                input_data_ = input_data_offset_buffer[-chunk_size * recording_channels:]
+
                 # Delay reached
-                if latency_chunk_counter >= latency_chunks - 1:
+                if latency_chunk_counter >= latency_chunks:
                     # Fill measurement buffer
-                    input_data_buffer[input_data_buffer_position:
-                                      input_data_buffer_position + chunk_size * recording_channels] \
-                        = input_data
-                    input_data_buffer_position += chunk_size * recording_channels
+                    fft_buffer[fft_buffer_position:
+                                      fft_buffer_position + chunk_size * recording_channels] = input_data_
+                    fft_buffer_position += chunk_size * recording_channels
 
                     # Measurement buffer is full
-                    if input_data_buffer_position == chunk_size * fft_size_chunks * recording_channels:
+                    if fft_buffer_position == chunk_size * fft_size_chunks * recording_channels:
                         # Reset measurement buffer position
-                        input_data_buffer_position = 0
+                        fft_buffer_position = 0
 
                         # Split into channels
-                        input_data = input_data_buffer.reshape((len(input_data_buffer) // recording_channels,
+                        input_data = fft_buffer.reshape((len(fft_buffer) // recording_channels,
                                                                 recording_channels))
                         data_per_channels = np.split(input_data, recording_channels, axis=1)
 
@@ -217,6 +235,10 @@ class NoiseHandler:
                             self.update_label_info.emit('Peak: ' + str(int(fft_peak_hz_avg)) + ' Hz '
                                                         + str(int(fft_peak_dbfs_avg)) + ' dBFS, Mean lvl: '
                                                         + str(int(fft_mean_avg_dbfs_avg)) + ' dBFS')
+
+                        # Set progress
+                        if self.update_measurement_progress is not None:
+                            self.update_measurement_progress.emit(int((chunk_counter / signal_duration_chunks) * 100.))
 
                 # Wait for delay
                 else:
