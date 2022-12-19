@@ -105,11 +105,11 @@ class NoiseHandler:
 
             # Buffer to increase delay to fil into full chunk
             input_data_offset_buffer = np.zeros((chunk_size + latency_samples_offset) * recording_channels,
-                                                dtype=np.float)
+                                                dtype=np.float32)
 
             # Recording data buffer (floats)
             fft_buffer = np.zeros(chunk_size * fft_size_chunks * recording_channels,
-                                         dtype=np.float)
+                                  dtype=np.float32)
 
             # Counters
             fft_buffer_position = 0
@@ -129,7 +129,7 @@ class NoiseHandler:
 
             # Resulted data (per channel)
             noise_result_dbfs = np.ones((recording_channels, chunk_size * fft_size_chunks // 2 + 1),
-                                        dtype=np.float) * -np.inf
+                                        dtype=np.float32) * -np.inf
 
             # Clear existing data
             self.audio_handler.frequency_response_frequencies = []
@@ -168,7 +168,7 @@ class NoiseHandler:
                 if latency_chunk_counter >= latency_chunks:
                     # Fill measurement buffer
                     fft_buffer[fft_buffer_position:
-                                      fft_buffer_position + chunk_size * recording_channels] = input_data_
+                               fft_buffer_position + chunk_size * recording_channels] = input_data_
                     fft_buffer_position += chunk_size * recording_channels
 
                     # Measurement buffer is full
@@ -178,7 +178,7 @@ class NoiseHandler:
 
                         # Split into channels
                         input_data = fft_buffer.reshape((len(fft_buffer) // recording_channels,
-                                                                recording_channels))
+                                                         recording_channels))
                         data_per_channels = np.split(input_data, recording_channels, axis=1)
 
                         # Info data

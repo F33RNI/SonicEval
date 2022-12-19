@@ -657,7 +657,7 @@ class AudioHandler:
         chunk_counter = 0
 
         # Recording buffer to store all samples for future analysis
-        recording_buffer = np.empty(0, dtype=np.float)
+        recording_buffer = np.empty(0, dtype=np.float32)
 
         # Frequency
         test_frequency_samples = self.chunk_size / 16
@@ -668,8 +668,8 @@ class AudioHandler:
         # chunk_size * 2 - 3: test_frequency_samples
         # phase change
         # chunk_size * 4 - 5: test_frequency_samples
-        samples_buffer = np.empty(0, dtype=np.float)
-        samples_buffer_silence = np.zeros(self.chunk_size, dtype=np.float)
+        samples_buffer = np.empty(0, dtype=np.float32)
+        samples_buffer_silence = np.zeros(self.chunk_size, dtype=np.float32)
         phase = 0
         for sample_chunk_n in range(6):
             # Invert phase 2 times
@@ -702,7 +702,7 @@ class AudioHandler:
 
             # Read data
             input_data_raw = self.recording_stream.read(self.chunk_size)
-            input_data = np.frombuffer(input_data_raw, dtype=np.float32)
+            input_data = np.frombuffer(input_data_raw, dtype=np.float3232)
 
             # Split into channels and make mono
             input_data = input_data.reshape((len(input_data) // recording_channels, recording_channels))
@@ -817,7 +817,7 @@ class AudioHandler:
         # Play silence
         if self.update_label_info is not None:
             self.update_label_info.emit('Playing silence for ' + str(SILENCE_BEFORE_MEASUREMENT_CHUNKS) + ' chunks...')
-        samples_buffer_silence = np.zeros(self.chunk_size, dtype=np.float)
+        samples_buffer_silence = np.zeros(self.chunk_size, dtype=np.float32)
         for _ in range(SILENCE_BEFORE_MEASUREMENT_CHUNKS):
             output_bytes = array.array('f', samples_buffer_silence).tobytes()
             self.playback_stream.write(output_bytes)

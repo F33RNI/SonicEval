@@ -163,7 +163,7 @@ class SweepHandler:
             fft_buffer_position = 0
 
             # Delay buffer for internal_calibration mode
-            calibration_delay_buffer = np.zeros(chunk_size * (latency_chunks + 1), dtype=np.float)
+            calibration_delay_buffer = np.zeros(chunk_size * (latency_chunks + 1), dtype=np.float32)
 
             # FFT window
             window = generate_window(window_type, chunk_size * fft_size_chunks)
@@ -179,20 +179,20 @@ class SweepHandler:
             frequency_last_played_counter = 0
 
             # Playback data buffer (floats)
-            samples = np.zeros(chunk_size, dtype=np.float)
+            samples = np.zeros(chunk_size, dtype=np.float32)
 
             # Buffer to increase delay to fil into full chunk
             input_data_offset_buffer = np.zeros((chunk_size + latency_samples_offset) * recording_channels,
-                                                dtype=np.float)
+                                                dtype=np.float32)
 
             # Recording data buffer (floats)
             fft_buffer = np.zeros(chunk_size * fft_size_chunks * recording_channels,
-                                  dtype=np.float)
+                                  dtype=np.float32)
 
             # Resulted data (per channel)
-            sweep_result_dbfs = np.empty((recording_channels, 0), dtype=np.float)
+            sweep_result_dbfs = np.empty((recording_channels, 0), dtype=np.float32)
             sweep_result_frequencies = np.empty(0, dtype=int)
-            result_dbfs_buffer = np.zeros(recording_channels, dtype=np.float)
+            result_dbfs_buffer = np.zeros(recording_channels, dtype=np.float32)
 
             # Clear existing data
             self.audio_handler.frequency_response_frequencies = []

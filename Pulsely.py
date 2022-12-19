@@ -30,7 +30,7 @@ import NoiseHandler
 import SettingsHandler
 import SweepHandler
 
-APP_VERSION = '1.2.2'
+APP_VERSION = '1.2.4'
 
 SETTINGS_FILE = 'settings.json'
 
@@ -624,8 +624,9 @@ class Window(QMainWindow):
 
 if __name__ == '__main__':
     # Replace icon in taskbar
-    pulsely_app_ip = 'f3rni.pulsely.pulsely.' + APP_VERSION
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(pulsely_app_ip)
+    if os.name == 'nt':
+        pulsely_app_ip = 'f3rni.pulsely.pulsely.' + APP_VERSION
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(pulsely_app_ip)
 
     # Start app
     app = QApplication.instance() or QApplication(sys.argv)
