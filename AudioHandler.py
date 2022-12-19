@@ -702,7 +702,7 @@ class AudioHandler:
 
             # Read data
             input_data_raw = self.recording_stream.read(self.chunk_size)
-            input_data = np.frombuffer(input_data_raw, dtype=np.float3232)
+            input_data = np.frombuffer(input_data_raw, dtype=np.float32)
 
             # Split into channels and make mono
             input_data = input_data.reshape((len(input_data) // recording_channels, recording_channels))
