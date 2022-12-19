@@ -150,7 +150,7 @@ class NoiseHandler:
                 playback_stream.write(output_bytes)
 
                 # Read data
-                input_data_raw = recording_stream.read(chunk_size)
+                input_data_raw = recording_stream.read(chunk_size, exception_on_overflow=False)
                 input_data = np.frombuffer(input_data_raw, dtype=np.float32)
 
                 # Write new data to the end of the buffer

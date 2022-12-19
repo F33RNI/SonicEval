@@ -701,7 +701,7 @@ class AudioHandler:
             self.playback_stream.write(output_bytes)
 
             # Read data
-            input_data_raw = self.recording_stream.read(self.chunk_size)
+            input_data_raw = self.recording_stream.read(self.chunk_size, exception_on_overflow=False)
             input_data = np.frombuffer(input_data_raw, dtype=np.float32)
 
             # Split into channels and make mono
@@ -821,7 +821,7 @@ class AudioHandler:
         for _ in range(SILENCE_BEFORE_MEASUREMENT_CHUNKS):
             output_bytes = array.array('f', samples_buffer_silence).tobytes()
             self.playback_stream.write(output_bytes)
-            self.recording_stream.read(self.chunk_size)
+            self.recording_stream.read(self.chunk_size, exception_on_overflow=False)
 
     def stop_measuring_latency(self):
         """
