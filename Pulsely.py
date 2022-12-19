@@ -30,7 +30,7 @@ import NoiseHandler
 import SettingsHandler
 import SweepHandler
 
-APP_VERSION = '1.2.0'
+APP_VERSION = '1.2.2'
 
 SETTINGS_FILE = 'settings.json'
 
