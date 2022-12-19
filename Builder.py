@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 import time
+import platform
 
 import Pulsely
 
@@ -149,7 +150,8 @@ if __name__ == '__main__':
                     time.sleep(1)
 
                     # Rename final folder
-                    os.rename('dist/' + MAIN_FILE, 'dist/' + MAIN_FILE + '-' + Pulsely.APP_VERSION + '-windows')
+                    os.rename('dist/' + MAIN_FILE, 'dist/' + MAIN_FILE + '-' + Pulsely.APP_VERSION
+                              + '-' + str(platform.system() + '-' + str(platform.machine())))
 
                 else:
                     print('Error. No dist/' + MAIN_FILE + ' folder!')
