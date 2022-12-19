@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>865</width>
-    <height>441</height>
+    <height>445</height>
    </rect>
   </property>
   <property name="font">
@@ -64,8 +64,8 @@
         <property name="geometry">
          <rect>
           <x>0</x>
-          <y>-416</y>
-          <width>406</width>
+          <y>-70</y>
+          <width>315</width>
           <height>1176</height>
          </rect>
         </property>
@@ -381,7 +381,7 @@ color:#3a224f;</string>
               <number>192000</number>
              </property>
              <property name="singleStep">
-              <number>1</number>
+              <number>50</number>
              </property>
              <property name="value">
               <number>20000</number>
