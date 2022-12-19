@@ -44,6 +44,9 @@ MEASURE_LATENCY_MAX_VOLUME = .9
 # What can be the maximum allowable difference between the two measured latencies
 MEASURE_LATENCY_MAX_TOLERANCE_SAMPLES = 5
 
+# Starting from what threshold (maximum level / threshold) to start detecting peaks
+MEASURE_LATENCY_PEAKS_THRESHOLD_VOLUME = 1.32
+
 # Defines
 DEVICE_TYPE_INPUT = 0
 DEVICE_TYPE_OUTPUT = 1
@@ -764,8 +767,10 @@ class AudioHandler:
                 self.error_message = 'Volume too high'
             else:
                 # Find signal peaks
-                peaks_positive, _ = find_peaks(recording_buffer, height=(volume / 2, volume * 2))
-                peaks_negative, _ = find_peaks(-recording_buffer, height=(volume / 2, volume * 2))
+                peaks_positive, _ = find_peaks(recording_buffer,
+                                               height=(volume / MEASURE_LATENCY_PEAKS_THRESHOLD_VOLUME, volume * 2))
+                peaks_negative, _ = find_peaks(-recording_buffer,
+                                               height=(volume / MEASURE_LATENCY_PEAKS_THRESHOLD_VOLUME, volume * 2))
 
                 # Find phase changes
                 phase_changes_positive_sample_n, phase_changes_positive_lvl \
@@ -802,9 +807,9 @@ class AudioHandler:
                             latency_samples = -1
                             self.error_message = 'Measured latency is negative'
                     else:
-                        self.error_message = 'Measured latencies are not equal'
+                        self.error_message = 'Measured latencies are not equal. Distortion or low sound level'
                 else:
-                    self.error_message = 'Cannot detect both phase changes'
+                    self.error_message = 'Cannot detect both phase changes. The signal may be distorted'
 
         return latency_samples
 
