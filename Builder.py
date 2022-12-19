@@ -34,7 +34,7 @@ INCLUDE_FILES = ['icon.png',
                  'examples',
                  'gui.ui',
                  'README.md',
-                 'LICENSE']
+                 'LICENCE']
 
 # Files and folders to exclude from final build directory (dist/MAIN_FILE folder)
 EXCLUDE_FILES = []
