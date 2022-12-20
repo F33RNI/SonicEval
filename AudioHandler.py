@@ -65,15 +65,15 @@ POSITION_ON_LEFT = 1
 POSITION_ON_RIGHT = 2
 
 
-def compute_fft_dbfs(data, window: np.ndarray, window_type: int, signal_type=TEST_SIGNAL_TYPE_SWEEP):
+def compute_fft_smag(data, window: np.ndarray, window_type: int, signal_type=TEST_SIGNAL_TYPE_SWEEP):
     """
-    Computes real fft in dBFS
+    Computes real fft in signal magnitude (rms)
     TODO: Make proper window compensation
     :param data: input data (float32)
     :param window: fft window (None, np.hamming, np.hanning or np.blackman)
     :param window_type: WINDOW_TYPE_NONE or WINDOW_TYPE_HAMMING or WINDOW_TYPE_HANNING or WINDOW_TYPE_BLACKMAN
     :param signal_type: TEST_SIGNAL_TYPE_SWEEP or TEST_SIGNAL_TYPE_NOISE to apply amplitude correction
-    :return: fft in dBFS
+    :return: fft
     """
 
     # Multiply by a window
@@ -105,8 +105,17 @@ def compute_fft_dbfs(data, window: np.ndarray, window_type: int, signal_type=TES
     else:
         s_mag *= math.sqrt(len(data) * window_power_bandwidth)
 
+    return s_mag
+
+
+def s_mag_to_dbfs(data_s_mag):
+    """
+    Converts signal magnitude to dbfs
+    :param data_s_mag:
+    :return:
+    """
     # Convert to dBFS
-    return 20 * np.log10(s_mag)
+    return 20 * np.log10(data_s_mag)
 
 
 def generate_window(window_type: int, length: int):
@@ -483,6 +492,9 @@ class AudioHandler:
         :param recording_channels: number of channels to record
         :return: playback_stream, recording_stream
         """
+        # Clear error message
+        self.error_message = ''
+
         try:
             playback_device_name = str(self.settings_handler.settings['audio_playback_interface'])
             recording_device_name = str(self.settings_handler.settings['audio_recording_interface'])
@@ -609,6 +621,9 @@ class AudioHandler:
             # Clear stop flag
             self.stop_flag = False
 
+            # Clear error message
+            self.error_message = ''
+
             # Reset latency
             self.audio_latency_samples = -1
 
@@ -723,7 +738,7 @@ class AudioHandler:
             recording_buffer = np.append(recording_buffer, input_data_mono)
 
             # Compute FFT
-            fft_dbfs = compute_fft_dbfs(input_data_mono, window, window_type)
+            fft_dbfs = s_mag_to_dbfs(compute_fft_smag(input_data_mono, window, window_type))
 
             # Mean of signal (dbfs)
             fft_mean = np.average(fft_dbfs)
@@ -738,7 +753,7 @@ class AudioHandler:
             if self.update_label_info is not None:
                 self.update_label_info.emit('Mean level: ' + str(int(fft_mean)) + ' dBFS, Peak level: '
                                             + str(int(fft_max)) + ' dBFS, Expected f: '
-                                            + str(int(fft_max_frequency_hz)) + ' Hz')
+                                            + str(int(expected_frequency_hz)) + ' Hz')
 
             # Detect that recording started
             if fft_max / fft_mean < 0.5 \
