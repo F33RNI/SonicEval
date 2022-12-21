@@ -186,6 +186,14 @@ def apply_reference(input_frequencies, input_levels, reference_frequencies, refe
     # Interpolated reference
     output_levels = np.array(input_levels).copy()
 
+    # Interpolate channels
+    if len(reference_levels) > len(input_levels):
+        reference_levels_ = reference_levels[:len(input_levels), :].copy()
+    elif len(reference_levels) < len(input_levels):
+        reference_levels_ = np.asarray([reference_levels[0]] * len(input_levels))
+    else:
+        reference_levels_ = reference_levels.copy()
+
     # Find how far is reference_frequencies from input_frequencies start
     from_start_to_ref_indexes = calculate_distance_indexes(input_frequencies, reference_frequencies)
 
@@ -201,7 +209,7 @@ def apply_reference(input_frequencies, input_levels, reference_frequencies, refe
     # Fill start gap with first reference value
     if from_start_to_ref_indexes is not None and from_start_to_ref_indexes > 0:
         reference_levels_interpolated_start = np.ones((len(input_levels), from_start_to_ref_indexes), dtype=float) \
-                                              * reference_levels.transpose()[0][:, None]
+                                              * reference_levels_.transpose()[0][:, None]
         reference_frequencies_interpolated_start \
             = np.ones(from_start_to_ref_indexes, dtype=float) * reference_frequencies[0]
     else:
@@ -211,9 +219,9 @@ def apply_reference(input_frequencies, input_levels, reference_frequencies, refe
     # Fill end gap with last reference value
     if from_end_to_ref_indexes is not None and from_end_to_ref_indexes < 0:
         reference_levels_interpolated_end = np.ones((len(input_levels), abs(from_end_to_ref_indexes)), dtype=float) \
-                                            * reference_levels.transpose()[-1][:, None]
+                                            * reference_levels_.transpose()[-1][:, None]
         reference_frequencies_interpolated_end \
-            = np.ones(from_end_to_ref_indexes, dtype=float) * reference_frequencies[-1]
+            = np.ones(abs(from_end_to_ref_indexes), dtype=float) * reference_frequencies[-1]
     else:
         reference_levels_interpolated_end = np.empty((len(input_levels), 0), dtype=float)
         reference_frequencies_interpolated_end = np.empty((len(input_levels), 0), dtype=float)
@@ -235,10 +243,10 @@ def apply_reference(input_frequencies, input_levels, reference_frequencies, refe
 
     # Interpolate middle part
     reference_levels_interpolated_middle = []
-    for channel_n in range(len(reference_levels)):
+    for channel_n in range(len(reference_levels_)):
         # Stretch each channel to middle_length_target
         reference_levels_interpolated_middle.append(stretch_to(list(
-            reference_levels[channel_n][reference_cut_index_start: reference_cut_index_end]), middle_length_target))
+            reference_levels_[channel_n][reference_cut_index_start: reference_cut_index_end]), middle_length_target))
     reference_levels_interpolated_middle = np.array(reference_levels_interpolated_middle)
     reference_frequencies_interpolated_middle = stretch_to(list(
         reference_frequencies[reference_cut_index_start: reference_cut_index_end]), middle_length_target)
