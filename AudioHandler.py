@@ -44,8 +44,12 @@ MEASURE_LATENCY_MAX_VOLUME = .9
 # What can be the maximum allowable difference between the two measured latencies
 MEASURE_LATENCY_MAX_TOLERANCE_SAMPLES = 5
 
-# Starting from what threshold (maximum level / threshold) to start detecting peaks
-MEASURE_LATENCY_PEAKS_THRESHOLD_VOLUME = 1.32
+# Detect peaks from (average peak volume / threshold)
+# to (average peak volume / threshold)
+PEAKS_THRESHOLD_VOLUME = 1.1
+
+# The frequency at which the plot point should be 0 dBSF
+NORMALIZE_FREQUENCY = 1000
 
 # Defines
 DEVICE_TYPE_INPUT = 0
@@ -114,8 +118,23 @@ def s_mag_to_dbfs(data_s_mag):
     :param data_s_mag:
     :return:
     """
+    # Prevent zero values
+    min_value = np.finfo(np.float).eps
+    data_s_mag[data_s_mag < min_value] = min_value
+
     # Convert to dBFS
     return 20 * np.log10(data_s_mag)
+
+
+def dbfs_to_s_mag(data_dbfs):
+    """
+    Converts dbfs to signal magnitude
+    :param data_dbfs:
+    :return:
+    """
+
+    # Convert to magnitude
+    return np.power(10., np.divide(data_dbfs, 20.))
 
 
 def generate_window(window_type: int, length: int):
@@ -156,6 +175,7 @@ def apply_reference(input_frequencies, input_levels, reference_frequencies, refe
     """
     Applies and interpolates reference to signal
     TODO: Optimise this shit
+
     :param input_frequencies: [f1, f2, f3]
     :param input_levels: [[ch1_f1_lvl, ch1_f2_lvl], [ch2_f1_lvl, ch2_f2_lvl]]
     :param reference_frequencies: [f1, f2, f3]
@@ -182,15 +202,21 @@ def apply_reference(input_frequencies, input_levels, reference_frequencies, refe
     if from_start_to_ref_indexes is not None and from_start_to_ref_indexes > 0:
         reference_levels_interpolated_start = np.ones((len(input_levels), from_start_to_ref_indexes), dtype=float) \
                                               * reference_levels.transpose()[0][:, None]
+        reference_frequencies_interpolated_start \
+            = np.ones(from_start_to_ref_indexes, dtype=float) * reference_frequencies[0]
     else:
         reference_levels_interpolated_start = np.empty((len(input_levels), 0), dtype=float)
+        reference_frequencies_interpolated_start = np.empty((len(input_levels), 0), dtype=float)
 
     # Fill end gap with last reference value
     if from_end_to_ref_indexes is not None and from_end_to_ref_indexes < 0:
         reference_levels_interpolated_end = np.ones((len(input_levels), abs(from_end_to_ref_indexes)), dtype=float) \
                                             * reference_levels.transpose()[-1][:, None]
+        reference_frequencies_interpolated_end \
+            = np.ones(from_end_to_ref_indexes, dtype=float) * reference_frequencies[-1]
     else:
         reference_levels_interpolated_end = np.empty((len(input_levels), 0), dtype=float)
+        reference_frequencies_interpolated_end = np.empty((len(input_levels), 0), dtype=float)
 
     # Calculate middle part length of interpolated reference signal
     middle_length_target = len(input_frequencies)
@@ -214,20 +240,29 @@ def apply_reference(input_frequencies, input_levels, reference_frequencies, refe
         reference_levels_interpolated_middle.append(stretch_to(list(
             reference_levels[channel_n][reference_cut_index_start: reference_cut_index_end]), middle_length_target))
     reference_levels_interpolated_middle = np.array(reference_levels_interpolated_middle)
+    reference_frequencies_interpolated_middle = stretch_to(list(
+        reference_frequencies[reference_cut_index_start: reference_cut_index_end]), middle_length_target)
+    reference_frequencies_interpolated_middle = np.array(reference_frequencies_interpolated_middle)
 
     # Build final interpolated reference
     if len(reference_levels_interpolated_start[0]) > 0:
         reference_levels_interpolated = np.append(reference_levels_interpolated_start,
                                                   reference_levels_interpolated_middle, axis=1)
+        reference_frequencies_interpolated = np.append(reference_frequencies_interpolated_start,
+                                                       reference_frequencies_interpolated_middle)
     else:
         reference_levels_interpolated = reference_levels_interpolated_middle
+        reference_frequencies_interpolated = reference_frequencies_interpolated_middle
     if len(reference_levels_interpolated_end[0]) > 0:
         reference_levels_interpolated = np.append(reference_levels_interpolated,
                                                   reference_levels_interpolated_end, axis=1)
+        reference_frequencies_interpolated = np.append(reference_frequencies_interpolated,
+                                                       reference_frequencies_interpolated_end)
 
     # Normalize?
     if normalize_ref:
-        reference_levels_interpolated = normalize_data(reference_levels_interpolated)
+        reference_levels_interpolated = normalize_data(reference_levels_interpolated,
+                                                       reference_frequencies_interpolated)
 
     # output = input - reference
     output_levels = np.subtract(output_levels, reference_levels_interpolated)
@@ -279,17 +314,34 @@ def calculate_distance_indexes(input_frequencies, reference_frequencies, calcula
     return from_input_to_ref_indexes
 
 
-def normalize_data(data):
+def normalize_data(data, frequencies):
     """
     Moves data to 0 dBFS
     :param data: data numpy array to normalize
+    :param frequencies: array of frequencies to determine normalize index
     :return: normalized data numpy array
     """
     data_norm = data.copy()
-    return np.add(data_norm, -np.max(data_norm))
+    frequencies_copy = frequencies.copy()
+
+    # Find normalization index
+    if len(frequencies_copy) > 1:
+        diff_to_norm_freq = abs(np.subtract(frequencies_copy, NORMALIZE_FREQUENCY))
+        normalize_index = np.where(diff_to_norm_freq == np.min(diff_to_norm_freq))[0][0]
+    else:
+        normalize_index = -1
+
+    if normalize_index < len(data_norm[0]) - 1:
+        norm_k = -data_norm[-1, normalize_index] if len(data) > 1 else -data_norm[0, normalize_index]
+    elif len(data_norm[0]) > 1:
+        norm_k = -data_norm[-1, len(data_norm[0]) // 2] if len(data) > 1 else -data_norm[0, len(data_norm[0]) // 2]
+    else:
+        norm_k = 0.
+
+    return np.add(data_norm, norm_k)
 
 
-def frequency_to_index(frequency, sample_rate: int, data_length: int):
+def frequency_to_index(frequency, sample_rate, data_length):
     """
     Converts frequency in Hz to index in FFT array
     :param frequency: frequency in Hz
@@ -300,7 +352,7 @@ def frequency_to_index(frequency, sample_rate: int, data_length: int):
     return int(_map(frequency, 0, sample_rate / 2, 0, data_length / 2))
 
 
-def index_to_frequency(index, sample_rate: int, data_length: int):
+def index_to_frequency(index, sample_rate, data_length):
     """
     Converts index in FFT array to frequency in Hz
     :param index: index in final fft array
@@ -462,10 +514,12 @@ class AudioHandler:
         # Final data
         self.frequency_response_frequencies = []
         self.frequency_response_levels_per_channels = []
+        self.frequency_response_distortions = []
 
         # Reference data
         self.reference_frequencies = []
         self.reference_levels_per_channels = []
+        self.reference_distortions = []
 
         # Class variables
         self.error_message = ''
@@ -780,19 +834,31 @@ class AudioHandler:
         # If exited successfully
         if self.error_message == '':
             # Measure peak volume
-            volume = (abs(np.min(recording_buffer)) + abs(np.max(recording_buffer))) / 2
+            volume_peak_absolute = (abs(np.min(recording_buffer)) + abs(np.max(recording_buffer))) / 2
+
+            # Find all peaks
+            peaks_positive_absolute, _ = find_peaks(recording_buffer,
+                                                    height=(volume_peak_absolute / 2, volume_peak_absolute * 2))
+            peaks_negative_absolute, _ = find_peaks(-recording_buffer,
+                                                    height=(volume_peak_absolute / 2, volume_peak_absolute * 2))
+
+            # Find average peaks volume
+            volume_peaks_positive = abs(np.average(recording_buffer[peaks_positive_absolute]))
+            volume_peaks_negative = abs(np.average(recording_buffer[peaks_negative_absolute]))
 
             # Check volume
-            if volume < MEASURE_LATENCY_MIN_VOLUME:
+            if volume_peak_absolute < MEASURE_LATENCY_MIN_VOLUME:
                 self.error_message = 'Volume too low'
-            elif volume > MEASURE_LATENCY_MAX_VOLUME:
+            elif volume_peak_absolute > MEASURE_LATENCY_MAX_VOLUME:
                 self.error_message = 'Volume too high'
             else:
                 # Find signal peaks
                 peaks_positive, _ = find_peaks(recording_buffer,
-                                               height=(volume / MEASURE_LATENCY_PEAKS_THRESHOLD_VOLUME, volume * 2))
+                                               height=(volume_peaks_positive / PEAKS_THRESHOLD_VOLUME,
+                                                       volume_peaks_positive * PEAKS_THRESHOLD_VOLUME))
                 peaks_negative, _ = find_peaks(-recording_buffer,
-                                               height=(volume / MEASURE_LATENCY_PEAKS_THRESHOLD_VOLUME, volume * 2))
+                                               height=(volume_peaks_negative / PEAKS_THRESHOLD_VOLUME,
+                                                       volume_peaks_negative * PEAKS_THRESHOLD_VOLUME))
 
                 # Find phase changes
                 phase_changes_positive_sample_n, phase_changes_positive_lvl \

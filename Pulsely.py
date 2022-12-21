@@ -17,6 +17,7 @@
 import ctypes
 import os
 import sys
+import time
 
 import psutil
 from PyQt5 import uic, QtGui, QtCore
@@ -30,7 +31,7 @@ import NoiseHandler
 import SettingsHandler
 import SweepHandler
 
-APP_VERSION = '1.2.4'
+APP_VERSION = '2.0.0'
 
 SETTINGS_FILE = 'settings.json'
 
@@ -203,6 +204,9 @@ class Window(QMainWindow):
                 else:
                     self.noise_handler.stop_measurement()
 
+                # Wait for process to finish
+                time.sleep(1)
+
             # Go to final step
             self.measurement_stage = MEASUREMENT_STAGE_IDLE
             self.measurement_continue()
@@ -328,17 +332,22 @@ class Window(QMainWindow):
         """
         try:
             # Load from file
-            recording_channels, frequencies, data_dbfs = self.file_loader.load_from_file(self)
+            recording_channels, frequencies, data_dbfs, distortions = self.file_loader.load_from_file(self)
             if recording_channels > 0 and len(frequencies) > 0 and len(data_dbfs) > 0:
                 # Assign internal variables
                 self.audio_handler.reference_frequencies = frequencies.copy()
                 self.audio_handler.reference_levels_per_channels = data_dbfs.copy()
+                if len(distortions) > 0:
+                    self.audio_handler.reference_distortions = distortions.copy()
+                else:
+                    self.audio_handler.reference_distortions = []
 
                 # Create plots
                 self.graph_plot_reference.plots_prepare(len(self.audio_handler.reference_levels_per_channels))
 
                 # Plot graph
-                self.graph_plot_reference.plot_data(frequencies, data_dbfs, self.cbox_normalize_reference.isChecked())
+                self.graph_plot_reference.plot_data(frequencies, data_dbfs, distortions,
+                                                    self.cbox_normalize_reference.isChecked())
 
         # Error
         except Exception as e:
@@ -369,6 +378,7 @@ class Window(QMainWindow):
                 and len(self.audio_handler.reference_frequencies) > 0:
             self.graph_plot_reference.plot_data(self.audio_handler.reference_frequencies,
                                                 self.audio_handler.reference_levels_per_channels,
+                                                self.audio_handler.reference_distortions,
                                                 self.cbox_normalize_reference.isChecked())
 
         # Re-plot main graph
@@ -509,7 +519,8 @@ class Window(QMainWindow):
         Set axes range of plot widget
         :return:
         """
-        self.graph_plot_main.plot_set_axes_range(self.audio_handler.frequency_response_frequencies)
+        self.graph_plot_main.plot_set_axes_range(self.audio_handler.frequency_response_frequencies
+                                                 , self.cbox_normalize.isChecked())
 
     def normalize_cbox_clicked(self):
         """
@@ -532,11 +543,13 @@ class Window(QMainWindow):
         # Unpack data
         frequencies = self.audio_handler.frequency_response_frequencies.copy()
         levels = self.audio_handler.frequency_response_levels_per_channels.copy()
+        distortions = self.audio_handler.frequency_response_distortions.copy()
 
         # Plot data
-        self.graph_plot_main.plot_data(frequencies, levels, self.cbox_normalize.isChecked(),
+        self.graph_plot_main.plot_data(frequencies, levels, distortions, self.cbox_normalize.isChecked(),
                                        self.audio_handler.reference_frequencies,
                                        self.audio_handler.reference_levels_per_channels,
+                                       self.audio_handler.reference_distortions,
                                        self.cbox_normalize_reference.isChecked())
 
     def save_to_file(self):
@@ -548,6 +561,10 @@ class Window(QMainWindow):
             # Unpack data
             frequencies = self.audio_handler.frequency_response_frequencies.copy()
             levels = self.audio_handler.frequency_response_levels_per_channels.copy()
+            if len(self.audio_handler.frequency_response_distortions) > 0:
+                distortions = self.audio_handler.frequency_response_distortions.copy()
+            else:
+                distortions = []
 
             if levels is not None and len(levels) > 0:
                 # Apply reference?
@@ -560,10 +577,10 @@ class Window(QMainWindow):
 
                 # Normalize?
                 if self.cbox_normalize_to_save.isChecked():
-                    levels = AudioHandler.normalize_data(levels)
+                    levels = AudioHandler.normalize_data(levels, frequencies)
 
                 # Save to file
-                self.file_loader.save_to_file(self, frequencies, levels)
+                self.file_loader.save_to_file(self, frequencies, levels, distortions)
 
             # No data yet
             else:
@@ -583,11 +600,15 @@ class Window(QMainWindow):
         """
         try:
             # Load from file
-            recording_channels, frequencies, data_dbfs = self.file_loader.load_from_file(self)
+            recording_channels, frequencies, data_dbfs, distortions = self.file_loader.load_from_file(self)
             if recording_channels > 0 and len(frequencies) > 0 and len(data_dbfs) > 0:
                 # Assign internal variables
                 self.audio_handler.frequency_response_frequencies = frequencies.copy()
                 self.audio_handler.frequency_response_levels_per_channels = data_dbfs.copy()
+                if len(distortions) > 0:
+                    self.audio_handler.frequency_response_distortions = distortions.copy()
+                else:
+                    self.audio_handler.frequency_response_distortions = []
 
                 # Create plots
                 self.graph_plot_main.plots_prepare(len(self.audio_handler.frequency_response_levels_per_channels))

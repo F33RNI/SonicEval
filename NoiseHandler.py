@@ -21,8 +21,8 @@ import traceback
 import numpy as np
 from PyQt5 import QtCore
 
-from AudioHandler import generate_window, compute_fft_dbfs, TEST_SIGNAL_TYPE_NOISE, butter_bandpass_filter, \
-    index_to_frequency, frequency_to_index, clamp
+from AudioHandler import generate_window, compute_fft_smag, s_mag_to_dbfs, \
+    TEST_SIGNAL_TYPE_NOISE, butter_bandpass_filter, index_to_frequency, frequency_to_index, clamp
 
 # Filter formula:
 # filter_k = -(((sample_rate / chunk_size) * fft_size_chunks) / (FILTER_SCALE * signal_duration_chunks)) + 1
@@ -49,6 +49,7 @@ class NoiseHandler:
         self.update_measurement_progress = None
         self.measurement_timer_start_signal = None
         self.measurement_completed = False
+        self.stop_flag = False
 
     def start_measurement(self, update_label_info: QtCore.pyqtSignal,
                           update_measurement_progress: QtCore.pyqtSignal,
@@ -76,6 +77,10 @@ class NoiseHandler:
 
     def noise_loop(self):
         try:
+            # Clear flags
+            self.stop_flag = False
+            self.measurement_completed = False
+
             # Open audio stream
             recording_channels = int(self.settings_handler.settings['audio_recording_channels'])
             playback_stream, recording_stream = self.audio_handler.open_audio(recording_channels)
@@ -134,8 +139,9 @@ class NoiseHandler:
             # Clear existing data
             self.audio_handler.frequency_response_frequencies = []
             self.audio_handler.frequency_response_levels_per_channels = []
+            self.audio_handler.frequency_response_distortions = []
 
-            while self.noise_thread_running:
+            while self.noise_thread_running and not self.stop_flag:
                 # Generate noise from -1 to 1
                 samples = np.random.random(chunk_size) * 2
                 samples -= 1
@@ -192,8 +198,9 @@ class NoiseHandler:
                         # Compute FFT for each channel
                         for channel_n in range(recording_channels):
                             # Compute FFT
-                            fft_dbfs = compute_fft_dbfs(data_per_channels[channel_n].flatten(), window, fft_window_type,
-                                                        TEST_SIGNAL_TYPE_NOISE)
+                            fft_dbfs = s_mag_to_dbfs(compute_fft_smag(
+                                data_per_channels[channel_n].flatten(),
+                                window, fft_window_type, TEST_SIGNAL_TYPE_NOISE))
 
                             # First run - initialize filter
                             if np.average(noise_result_dbfs[channel_n]) == -np.inf:
@@ -217,14 +224,15 @@ class NoiseHandler:
                         fft_mean_avg_dbfs_avg /= recording_channels
 
                         # Cut data to bandwidth
-                        bandwidth_index_start = frequency_to_index(signal_start_freq, sample_rate, data_length)
-                        bandwidth_index_stop = frequency_to_index(signal_stop_freq, sample_rate, data_length)
+                        bandwidth_index_start = max(frequency_to_index(signal_start_freq, sample_rate, data_length), 1)
+                        bandwidth_index_stop = max(frequency_to_index(signal_stop_freq, sample_rate, data_length), 1)
 
                         # Send data to AudioHandler class
-                        self.audio_handler.frequency_response_frequencies \
-                            = fft_frequencies[bandwidth_index_start: bandwidth_index_stop]
-                        self.audio_handler.frequency_response_levels_per_channels \
-                            = noise_result_dbfs[:, bandwidth_index_start: bandwidth_index_stop]
+                        if bandwidth_index_start < bandwidth_index_stop:
+                            self.audio_handler.frequency_response_frequencies \
+                                = fft_frequencies[bandwidth_index_start: bandwidth_index_stop]
+                            self.audio_handler.frequency_response_levels_per_channels \
+                                = noise_result_dbfs[:, bandwidth_index_start: bandwidth_index_stop]
 
                         # Plot graph
                         if self.plot_on_graph_signal is not None:
@@ -238,7 +246,8 @@ class NoiseHandler:
 
                         # Set progress
                         if self.update_measurement_progress is not None:
-                            self.update_measurement_progress.emit(int((chunk_counter / signal_duration_chunks) * 100.))
+                            self.update_measurement_progress.emit(
+                                int((chunk_counter / signal_duration_chunks) * 100.))
 
                 # Wait for delay
                 else:
@@ -257,12 +266,8 @@ class NoiseHandler:
             # Close audio streams
             self.audio_handler.close_audio()
 
-            # Clear info
-            if self.update_label_info is not None:
-                self.update_label_info.emit('')
-
             # Start exit timer
-            if self.measurement_timer_start_signal is not None:
+            if self.measurement_timer_start_signal is not None and not self.stop_flag:
                 self.measurement_timer_start_signal.emit(1)
 
         # Error frequency response measurement
@@ -277,10 +282,7 @@ class NoiseHandler:
         Stops current measurement
         :return:
         """
+        self.stop_flag = True
         if self.noise_thread_running:
             # Clear loop flag
             self.noise_thread_running = False
-
-            # Clear info
-            if self.update_label_info is not None:
-                self.update_label_info.emit('')

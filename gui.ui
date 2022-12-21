@@ -64,8 +64,8 @@
         <property name="geometry">
          <rect>
           <x>0</x>
-          <y>-70</y>
-          <width>315</width>
+          <y>0</y>
+          <width>307</width>
           <height>1176</height>
          </rect>
         </property>
@@ -85,7 +85,7 @@
          <item>
           <widget class="QLabel" name="label_24">
            <property name="text">
-            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Frequency response measurement software&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Audio Quality Measurement Software&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
            </property>
            <property name="wordWrap">
             <bool>true</bool>
@@ -130,7 +130,7 @@
            <item>
             <widget class="QCheckBox" name="cbox_normalize_to_save">
              <property name="text">
-              <string>Normalize</string>
+              <string>Normalize before save</string>
              </property>
             </widget>
            </item>
@@ -812,7 +812,7 @@ color: #fcc88d;</string>
                <enum>Qt::LeftToRight</enum>
               </property>
               <property name="text">
-               <string>Normalize data</string>
+               <string>Normalize f. graph</string>
               </property>
              </widget>
             </item>
