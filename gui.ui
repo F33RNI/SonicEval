@@ -812,7 +812,7 @@ color: #fcc88d;</string>
                <enum>Qt::LeftToRight</enum>
               </property>
               <property name="text">
-               <string>Normalize f. graph</string>
+               <string>Normalize @ 1KHz</string>
               </property>
              </widget>
             </item>
