@@ -124,7 +124,7 @@ class GraphPlot:
             plot_color_level \
                 = int(255 - (channel_n / recording_channels) * 255), int((channel_n / recording_channels) * 255), 0
             plot_color_distortion \
-                = int(255 - (channel_n / recording_channels) * 255), int((channel_n / recording_channels) * 255), 127
+                = int(127 - (channel_n / recording_channels) * 127), int((channel_n / recording_channels) * 127), 127
             # Levels
             self.graph_curves_frequency_responses.append(
                 self.frequency_response_plotter.plot(pen=mkPen(color=plot_color_level),
