@@ -39,10 +39,10 @@ In sweep mode **Pulsely** also measures THD (total harmonic distortions) with IE
 2. In **Audio interface** section select your output and input devices
 3. Specify sample rate, start and stop frequencies, test duration and other parameters
 4. If possible, connect the output of your audio interface to the input. Run the test and save the result. This is required for calibration
-5. Connect your audio system to the interface *(for example, the output of the audio interface connect to the speakers whose frequency response you want to measure, and the input to high-quality linear microphone)*
-6. Select calibration profile (if available) in the **Reference** section
+5. Connect your audio system to the interface *(for example, the output of the audio interface connect to the speakers whose frequency response and THD you want to measure, and the input to high-quality linear microphone)*
+6. Select calibration file (if available) in the **Reference** section
 7. Start measurement and wait
-8. Done! You can save frequency response to CSV file or export as PNG image *(it is recommended to open the application in full screen for an image in a higher resolution)*
+8. Done! You can save frequency response and THD to CSV file or export as PNG image *(it is recommended to open the application in full screen for an image in a higher resolution)*
 
 ----------
 
