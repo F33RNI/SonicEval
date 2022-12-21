@@ -291,7 +291,13 @@ class Window(QMainWindow):
                 if (signal_type == AudioHandler.TEST_SIGNAL_TYPE_SWEEP and self.sweep_handler.meas_or_calib_completed) \
                         or (signal_type == AudioHandler.TEST_SIGNAL_TYPE_NOISE
                             and self.noise_handler.measurement_completed):
-                    QMessageBox.information(self, 'Done', 'Frequency response measurement completed!', QMessageBox.Ok)
+
+                    # Show score
+                    self.show_score()
+
+                    QMessageBox.information(self, 'Done', 'Measurement completed!\n\n'
+                                            + 'Quality score: '
+                                            + self.audio_handler.compute_final_score(), QMessageBox.Ok)
                     self.measurement_stage = MEASUREMENT_STAGE_IDLE
 
             # Done
@@ -616,9 +622,19 @@ class Window(QMainWindow):
                 # Plot graph
                 self.plot_data()
 
+                # Show score
+                self.show_score()
+
         # Error
         except Exception as e:
             QMessageBox.critical(self, 'Error', 'Error loading file!\n\n' + str(e), QMessageBox.Ok)
+
+    def show_score(self):
+        """
+        Shows system score
+        :return:
+        """
+        self.label_info.setText('Quality score: ' + self.audio_handler.compute_final_score())
 
     def disable_controls(self):
         """

@@ -929,3 +929,53 @@ class AudioHandler:
             # Display message
             if self.label_latency_update_signal is not None:
                 self.label_latency_update_signal.emit('Latency measurement stopped!')
+
+    def compute_final_score(self):
+        """
+        Calculates arbitrary score of the system
+        :return:
+        """
+        frequency_response = self.frequency_response_levels_per_channels
+        channels_n = len(frequency_response)
+        total_score = np.zeros(channels_n, dtype=np.float32)
+
+        if channels_n > 0 and len(frequency_response[0]) > 0:
+            distortions = self.frequency_response_distortions
+            reference_distortions = self.reference_distortions
+            reference_frequencies = self.reference_frequencies
+            reference_levels_per_channels = self.reference_levels_per_channels
+            frequency_response_ = frequency_response.copy()
+            distortions_ = distortions.copy()
+
+            # Apply references
+            if len(reference_frequencies) > 0:
+                frequency_response_ = apply_reference(self.frequency_response_frequencies, frequency_response_,
+                                                      reference_frequencies, reference_levels_per_channels)
+                if len(distortions) > 0:
+                    distortions_ = apply_reference(self.frequency_response_frequencies, distortions_,
+                                                   reference_frequencies, reference_distortions, True)
+
+            # Calculate flatness
+            for channel_n in range(channels_n):
+                channel_avg = np.average(frequency_response_[channel_n])
+                frequency_response_[channel_n] -= channel_avg
+                flatness = np.average(abs(frequency_response_[channel_n]))
+                if flatness < 0.0001:
+                    flatness = 0.0001
+                flatness = clamp((1.4 - math.log10(flatness)) * 100., 0, 100)
+                total_score[channel_n] = flatness
+
+            # Calculate distortions
+            if len(distortions_) > 0:
+                for channel_n in range(channels_n):
+                    thd_score = clamp(-np.average(distortions_[channel_n]), 0, 100)
+                    total_score[channel_n] = total_score[channel_n] + thd_score
+                    total_score[channel_n] = np.divide(total_score[channel_n], 2)
+
+        # Make info string
+        total_score_str = ''
+        for channel_n in range(channels_n):
+            total_score_str += 'CH' + str(channel_n + 1) + ': ' + str(int(total_score[channel_n])) + '%'
+            if channel_n < channels_n - 1:
+                total_score_str += ', '
+        return total_score_str
