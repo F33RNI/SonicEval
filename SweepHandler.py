@@ -23,9 +23,7 @@ import numpy as np
 from PyQt5 import QtCore
 
 from AudioHandler import generate_window, compute_fft_smag, s_mag_to_dbfs, \
-    frequency_to_index, index_to_frequency, clamp
-
-THD_RATIO_MIN = math.pow(10, -100 / 20.)
+    frequency_to_index, index_to_frequency, clamp, THD_RATIO_MIN
 
 
 def get_thd_rms_ratio(fft_smag, frequency, peak_index, sample_rate, data_length, thd_rms_ratio_last,
@@ -92,11 +90,18 @@ def get_thd_rms_ratio(fft_smag, frequency, peak_index, sample_rate, data_length,
 
     # Apply internal reference
     if internal_reference_value is not None:
-        thd_ratio -= internal_reference_value
+        if internal_reference_value < thd_ratio:
+            thd_ratio -= internal_reference_value
+        else:
+            thd_ratio = THD_RATIO_MIN
 
     # Limit to the minimum value
     if thd_ratio < THD_RATIO_MIN:
         thd_ratio = THD_RATIO_MIN
+
+    # Filter again with 1/2 filter_k
+    if internal_reference_value is not None:
+        thd_ratio = thd_rms_ratio_last * (filter_k / 2) + thd_ratio * (1. - (filter_k / 2))
 
     return thd_ratio
 
