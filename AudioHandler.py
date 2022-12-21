@@ -51,6 +51,10 @@ PEAKS_THRESHOLD_VOLUME = 1.1
 # The frequency at which the plot point should be 0 dBSF
 NORMALIZE_FREQUENCY = 1000
 
+# Minimum THD level
+THD_DB_MIN = -100.
+THD_RATIO_MIN = math.pow(10, THD_DB_MIN / 20.)
+
 # Defines
 DEVICE_TYPE_INPUT = 0
 DEVICE_TYPE_OUTPUT = 1
@@ -834,7 +838,7 @@ class AudioHandler:
             # Timeout error measuring latency
             if chunk_counter >= MEASURE_LATENCY_MAX_LATENCY_CHUNKS:
                 self.error_message = 'Timeout error (no signal detected in ' \
-                                     + str(MEASURE_LATENCY_MAX_LATENCY_CHUNKS) + ' chunks)'
+                                     + str(MEASURE_LATENCY_MAX_LATENCY_CHUNKS) + ' chunks).\nTry turning up the volume'
                 latency_samples = -1
                 self.measure_latency_thread_running = False
                 break
@@ -903,9 +907,9 @@ class AudioHandler:
                             latency_samples = -1
                             self.error_message = 'Measured latency is negative'
                     else:
-                        self.error_message = 'Measured latencies are not equal. Distortion or low sound level'
+                        self.error_message = 'Measured latencies are not equal.\nTry changing the volume'
                 else:
-                    self.error_message = 'Cannot detect both phase changes. The signal may be distorted'
+                    self.error_message = 'Cannot detect both phase changes.\nTry changing the volume'
 
         return latency_samples
 
@@ -976,14 +980,20 @@ class AudioHandler:
             # Calculate distortions
             if len(distortions_) > 0:
                 for channel_n in range(channels_n):
-                    thd_score = clamp(-np.average(distortions_[channel_n]), 0, 100)
-                    total_score[channel_n] = total_score[channel_n] + thd_score
-                    total_score[channel_n] = np.divide(total_score[channel_n], 2)
+                    channel_distortions_ = distortions_[channel_n]
+                    min_index = np.argmax(channel_distortions_ > THD_DB_MIN)
+                    if min_index is not None and min_index >= 0:
+                        thd_score = clamp(-np.average(channel_distortions_[min_index:]), 0, 100)
+                        total_score[channel_n] = total_score[channel_n] + thd_score
+                        total_score[channel_n] = np.divide(total_score[channel_n], 2)
 
         # Make info string
         total_score_str = ''
         for channel_n in range(channels_n):
             total_score_str += 'CH' + str(channel_n + 1) + ': ' + str(int(total_score[channel_n])) + '%'
-            if channel_n < channels_n - 1:
-                total_score_str += ', '
+            total_score_str += ', '
+
+        # Add average string
+        total_score_str += 'Average: ' + str(int(np.average(total_score))) + '%'
+
         return total_score_str
