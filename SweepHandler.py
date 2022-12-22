@@ -123,6 +123,7 @@ class SweepHandler:
         self.update_label_info = None
         self.update_measurement_progress = None
         self.measurement_timer_start_signal = None
+        self.update_volume_signal = None
         self.graph_curves = []
         self.meas_or_calib_completed = False
         self.internal_reference_dbfs = []
@@ -169,13 +170,15 @@ class SweepHandler:
     def start_measurement(self, update_label_info: QtCore.pyqtSignal,
                           update_measurement_progress: QtCore.pyqtSignal,
                           measurement_timer_start_signal: QtCore.pyqtSignal,
-                          plot_on_graph_signal: QtCore.pyqtSignal, internal_calibration=False):
+                          plot_on_graph_signal: QtCore.pyqtSignal,
+                          update_volume_signal: QtCore.pyqtSignal, internal_calibration=False):
         """
         Starts sweep_loop
         :param update_label_info:
         :param update_measurement_progress:
         :param measurement_timer_start_signal:
         :param plot_on_graph_signal:
+        :param update_volume_signal:
         :param internal_calibration:
         :return:
         """
@@ -183,6 +186,7 @@ class SweepHandler:
         self.update_measurement_progress = update_measurement_progress
         self.measurement_timer_start_signal = measurement_timer_start_signal
         self.plot_on_graph_signal = plot_on_graph_signal
+        self.update_volume_signal = update_volume_signal
 
         # Calculate sweep frequencies
         self.map_sweep_frequencies()
@@ -345,8 +349,8 @@ class SweepHandler:
 
                         # Info data
                         fft_actual_peak_hz_avg = 0
-                        fft_in_range_peak_hz_avg = 0
                         fft_mean_avg_dbfs = 0
+                        fft_max_avg_dbfs = 0
 
                         # Get frequency from delay buffer
                         frequency_delayed = self.sweep_frequencies[frequency_indexes_buffer[-1]]
@@ -398,9 +402,7 @@ class SweepHandler:
                             actual_peak = index_to_frequency(
                                 np.where(fft_dbfs == np.max(fft_dbfs))[0][0], sample_rate, data_length)
                             fft_actual_peak_hz_avg += actual_peak
-
-                            # Frequency of measured peak (from frequency_start_index to frequency_stop_index)
-                            fft_in_range_peak_hz_avg += index_to_frequency(peak_index, sample_rate, data_length)
+                            fft_max_avg_dbfs += np.max(fft_dbfs)
 
                             # Mean signal level
                             fft_mean_avg_dbfs += np.average(fft_dbfs)
@@ -415,8 +417,8 @@ class SweepHandler:
 
                         # Calculate average info
                         fft_actual_peak_hz_avg /= recording_channels
-                        fft_in_range_peak_hz_avg /= recording_channels
                         fft_mean_avg_dbfs /= recording_channels
+                        fft_max_avg_dbfs /= recording_channels
 
                         # Increment frequency change counter
                         frequency_last_played_counter += 1
@@ -470,8 +472,11 @@ class SweepHandler:
                             if self.update_label_info is not None:
                                 self.update_label_info.emit('Exp. peak: ' + str(int(frequency_delayed)) + ' Hz'
                                                             + ', Act. peak: ' + str(int(fft_actual_peak_hz_avg)) + ' Hz'
-                                                            + ', Meas. peak: ' + str(int(fft_in_range_peak_hz_avg))
-                                                            + ' Hz, Mean lvl: ' + str(int(fft_mean_avg_dbfs)) + ' dBFS')
+                                                            + ', Mean lvl: ' + str(int(fft_mean_avg_dbfs)) + ' dBFS')
+
+                            # Volume
+                            if self.update_volume_signal is not None:
+                                self.update_volume_signal.emit(int(fft_max_avg_dbfs))
 
                             # Set progress (2nd part, 90%)
                             if self.update_measurement_progress is not None:

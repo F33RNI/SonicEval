@@ -56,6 +56,7 @@ class Window(QMainWindow):
     update_measurement_progress = QtCore.pyqtSignal(int)  # QtCore.Signal(int)
     measurement_continue_timer_start_signal = QtCore.pyqtSignal(int)  # QtCore.Signal(int)
     plot_on_graph_signal = QtCore.pyqtSignal()  # QtCore.Signal()
+    update_volume_signal = QtCore.pyqtSignal(int)  # QtCore.Signal(int)
 
     def __init__(self):
         super(Window, self).__init__()
@@ -108,6 +109,7 @@ class Window(QMainWindow):
         self.update_measurement_progress.connect(self.measurement_progress.setValue)
         self.measurement_continue_timer_start_signal.connect(self.measurement_continue_timer.start)
         self.plot_on_graph_signal.connect(self.plot_data)
+        self.update_volume_signal.connect(self.update_volume)
 
         # Initialize window combobox
         self.fft_window_type.addItems(['None', 'Hamming', 'Hanning', 'Blackman'])
@@ -164,13 +166,14 @@ class Window(QMainWindow):
 
             # Reset progress bar
             self.measurement_progress.setValue(0)
+            self.update_volume(-100)
 
             # Measure internal reference in sweep mode
             if int(self.settings_handler.settings['signal_type']) == AudioHandler.TEST_SIGNAL_TYPE_SWEEP:
                 self.measurement_stage = MEASUREMENT_STAGE_REFERENCE
                 self.sweep_handler.start_measurement(self.update_label_info, self.update_measurement_progress,
                                                      self.measurement_continue_timer_start_signal,
-                                                     self.plot_on_graph_signal, True)
+                                                     self.plot_on_graph_signal, self.update_volume_signal, True)
 
             # Measure latency
             else:
@@ -188,7 +191,8 @@ class Window(QMainWindow):
                     self.measurement_stage = MEASUREMENT_STAGE_LATENCY
                     self.audio_handler.measure_latency(self.update_label_latency,
                                                        self.update_label_info,
-                                                       self.measurement_continue_timer_start_signal)
+                                                       self.measurement_continue_timer_start_signal,
+                                                       self.update_volume_signal)
 
         # Stop button pressed
         elif self.btn_measurement_action == BTN_MEASUREMENT_ACTION_STOP:
@@ -218,6 +222,7 @@ class Window(QMainWindow):
         # Clear labels and progress bar
         self.label_info.setText('')
         self.measurement_progress.setValue(0)
+        self.update_volume(-100)
 
         # Previous stage is internal reference measurement
         if self.measurement_stage == MEASUREMENT_STAGE_REFERENCE:
@@ -237,7 +242,8 @@ class Window(QMainWindow):
                     self.measurement_stage = MEASUREMENT_STAGE_LATENCY
                     self.audio_handler.measure_latency(self.update_label_latency,
                                                        self.update_label_info,
-                                                       self.measurement_continue_timer_start_signal)
+                                                       self.measurement_continue_timer_start_signal,
+                                                       self.update_volume_signal)
 
             # Reference measurement failed
             elif self.sweep_handler.error_message != '':
@@ -260,11 +266,11 @@ class Window(QMainWindow):
                 if int(self.settings_handler.settings['signal_type']) == AudioHandler.TEST_SIGNAL_TYPE_SWEEP:
                     self.sweep_handler.start_measurement(self.update_label_info, self.update_measurement_progress,
                                                          self.measurement_continue_timer_start_signal,
-                                                         self.plot_on_graph_signal)
+                                                         self.plot_on_graph_signal, self.update_volume_signal)
                 else:
                     self.noise_handler.start_measurement(self.update_label_info, self.update_measurement_progress,
                                                          self.measurement_continue_timer_start_signal,
-                                                         self.plot_on_graph_signal)
+                                                         self.plot_on_graph_signal, self.update_volume_signal)
 
             # Latency measurement failed
             else:
@@ -312,6 +318,16 @@ class Window(QMainWindow):
             self.enable_controls()
             self.btn_measurement_start.setText(BTN_MEASUREMENT_START_TEXT)
             self.btn_measurement_action = BTN_MEASUREMENT_ACTION_START
+
+    def update_volume(self, volume_dbfs: int):
+        """
+        Updates volume progress bar and label
+        :param volume_dbfs:
+        :return:
+        """
+        volume_percents = AudioHandler.clamp(AudioHandler._map(volume_dbfs, -60, 3, 0, 100), 0, 100)
+        self.volume_bar.setValue(volume_percents)
+        self.volume_label.setText(str(volume_dbfs) + ' dBFS')
 
     def show_error_message(self, error_message):
         """

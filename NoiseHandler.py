@@ -48,25 +48,29 @@ class NoiseHandler:
         self.update_label_info = None
         self.update_measurement_progress = None
         self.measurement_timer_start_signal = None
+        self.update_volume_signal = None
         self.measurement_completed = False
         self.stop_flag = False
 
     def start_measurement(self, update_label_info: QtCore.pyqtSignal,
                           update_measurement_progress: QtCore.pyqtSignal,
                           measurement_timer_start_signal: QtCore.pyqtSignal,
-                          plot_on_graph_signal: QtCore.pyqtSignal):
+                          plot_on_graph_signal: QtCore.pyqtSignal,
+                          update_volume_signal: QtCore.pyqtSignal):
         """
         Starts sweep_loop
         :param update_label_info:
         :param update_measurement_progress:
         :param measurement_timer_start_signal:
         :param plot_on_graph_signal:
+        :param update_volume_signal:
         :return:
         """
         self.update_label_info = update_label_info
         self.update_measurement_progress = update_measurement_progress
         self.measurement_timer_start_signal = measurement_timer_start_signal
         self.plot_on_graph_signal = plot_on_graph_signal
+        self.update_volume_signal = update_volume_signal
 
         # Clear flag
         self.measurement_completed = False
@@ -240,9 +244,12 @@ class NoiseHandler:
 
                         # Print info
                         if self.update_label_info is not None:
-                            self.update_label_info.emit('Peak: ' + str(int(fft_peak_hz_avg)) + ' Hz '
-                                                        + str(int(fft_peak_dbfs_avg)) + ' dBFS, Mean lvl: '
-                                                        + str(int(fft_mean_avg_dbfs_avg)) + ' dBFS')
+                            self.update_label_info.emit('Peak: ' + str(int(fft_peak_hz_avg)) + ' Hz , Peak lvl: '
+                                                        + str(int(fft_peak_dbfs_avg)) + ' dBFS')
+
+                        # Volume
+                        if self.update_volume_signal is not None:
+                            self.update_volume_signal.emit(int(fft_mean_avg_dbfs_avg))
 
                         # Set progress
                         if self.update_measurement_progress is not None:

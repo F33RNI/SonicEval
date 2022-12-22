@@ -543,6 +543,7 @@ class AudioHandler:
         self.measurement_timer_start_signal = None
         self.chunk_size = 0
         self.stop_flag = False
+        self.update_volume_signal = None
 
     def calculate_chunk_size(self, sample_rate):
         """
@@ -660,17 +661,20 @@ class AudioHandler:
 
     def measure_latency(self, label_latency_update_signal: QtCore.pyqtSignal,
                         update_label_info: QtCore.pyqtSignal,
-                        measurement_timer_start_signal: QtCore.pyqtSignal):
+                        measurement_timer_start_signal: QtCore.pyqtSignal,
+                        update_volume_signal: QtCore.pyqtSignal):
         """
         Starts measure_latency_loop
         :param label_latency_update_signal:
         :param update_label_info:
         :param measurement_timer_start_signal:
+        :param update_volume_signal:
         :return:
         """
         self.label_latency_update_signal = label_latency_update_signal
         self.update_label_info = update_label_info
         self.measurement_timer_start_signal = measurement_timer_start_signal
+        self.update_volume_signal = update_volume_signal
 
         # Reset error message
         self.error_message = ''
@@ -817,9 +821,12 @@ class AudioHandler:
 
             # Print info
             if self.update_label_info is not None:
-                self.update_label_info.emit('Mean level: ' + str(int(fft_mean)) + ' dBFS, Peak level: '
-                                            + str(int(fft_max)) + ' dBFS, Expected f: '
+                self.update_label_info.emit('Mean level: ' + str(int(fft_mean)) + ' dBFS, Expected f: '
                                             + str(int(expected_frequency_hz)) + ' Hz')
+
+            # Update volume
+            if self.update_volume_signal is not None:
+                self.update_volume_signal.emit(int(fft_max))
 
             # Detect that recording started
             if fft_max / fft_mean < 0.5 \
