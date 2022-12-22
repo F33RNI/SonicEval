@@ -38,7 +38,7 @@ MEASURE_LATENCY_VOLUME = 0.8
 MEASURE_LATENCY_ACCEPTED_DEVIATION_HZ = 100.
 
 # Accepted volume range while detecting latency
-MEASURE_LATENCY_MIN_VOLUME = .07
+MEASURE_LATENCY_MIN_VOLUME = .05
 MEASURE_LATENCY_MAX_VOLUME = .9
 
 # What can be the maximum allowable difference between the two measured latencies
