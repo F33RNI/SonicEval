@@ -5,3 +5,4 @@ dist/
 settings.json
 Pulsely.spec
 SonicEval.spec
+/venv/

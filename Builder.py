@@ -23,6 +23,10 @@ import platform
 
 import SonicEval
 
+# Remove all files before building?
+CLEAN = True
+
+# Name of main file and output directory
 MAIN_FILE = 'SonicEval'
 
 # Text to add to the spec file
@@ -45,15 +49,16 @@ EXCLUDE_FROM_BUILD = []
 if __name__ == '__main__':
     pyi_command = []
 
-    # Remove dist folder is exists
-    if 'dist' in os.listdir('./'):
-        shutil.rmtree('dist', ignore_errors=True)
-        print('dist folder deleted')
+    if CLEAN:
+        # Remove dist folder is exists
+        if 'dist' in os.listdir('./'):
+            shutil.rmtree('dist', ignore_errors=True)
+            print('dist folder deleted')
 
-    # Remove build folder is exists
-    if 'build' in os.listdir('./'):
-        shutil.rmtree('build', ignore_errors=True)
-        print('build folder deleted')
+        # Remove build folder is exists
+        if 'build' in os.listdir('./'):
+            shutil.rmtree('build', ignore_errors=True)
+            print('build folder deleted')
 
     # Add all .py files to pyi_command
     for file in os.listdir('./'):
@@ -102,7 +107,9 @@ if __name__ == '__main__':
                 spec_file_output.close()
 
                 # Create new pyi command
-                pyi_command = ['pyinstaller', MAIN_FILE + '.spec', '--clean']
+                pyi_command = ['pyinstaller', MAIN_FILE + '.spec']
+                if CLEAN:
+                    pyi_command.append('--clean')
 
                 # Execute pyi
                 subprocess.run(pyi_command, text=True)
@@ -111,9 +118,10 @@ if __name__ == '__main__':
                 if 'dist' in os.listdir('.') and MAIN_FILE in os.listdir('./dist'):
 
                     # Remove build folder is exists
-                    if 'build' in os.listdir('./'):
-                        shutil.rmtree('build', ignore_errors=True)
-                        print('build folder deleted')
+                    if CLEAN:
+                        if 'build' in os.listdir('./'):
+                            shutil.rmtree('build', ignore_errors=True)
+                            print('build folder deleted')
 
                     # Wait some time
                     print('Waiting 1 second...')
