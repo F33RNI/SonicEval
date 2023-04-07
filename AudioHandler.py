@@ -1002,7 +1002,6 @@ class AudioHandler:
 
                         # Invert range and clamp
                         thd_score = 100 - clamp(thd_score, 0, 100)
-                        print(thd_score)
 
                         total_score[channel_n] = total_score[channel_n] + thd_score
                         total_score[channel_n] = np.divide(total_score[channel_n], 2)
