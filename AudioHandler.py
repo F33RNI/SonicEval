@@ -992,7 +992,18 @@ class AudioHandler:
                     channel_distortions_ = distortions_[channel_n]
                     min_index = np.argmax(channel_distortions_ > THD_RATIO_MIN)
                     if min_index is not None and min_index >= 0:
-                        thd_score = 100 - clamp(np.average(channel_distortions_[min_index:]), 0, 100)
+                        # Get maximum distortion
+                        thd_score = np.max(channel_distortions_[min_index:])
+
+                        # Apply log scale
+                        if thd_score < THD_RATIO_MIN * 100.:
+                            thd_score = THD_RATIO_MIN * 100.
+                        thd_score = 50. * clamp(math.log10(thd_score), 0, 100)
+
+                        # Invert range and clamp
+                        thd_score = 100 - clamp(thd_score, 0, 100)
+                        print(thd_score)
+
                         total_score[channel_n] = total_score[channel_n] + thd_score
                         total_score[channel_n] = np.divide(total_score[channel_n], 2)
 
