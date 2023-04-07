@@ -1,5 +1,5 @@
 """
- Copyright (C) 2022 Fern Lane, Pulsely project
+ Copyright (C) 2022 Fern Lane, SonicEval (aka Pulsely) project
  Licensed under the GNU Affero General Public License, Version 3.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -34,7 +34,7 @@ SETTINGS_DEFAULT = {
     'audio_playback_volume': 70,
 
     'fft_size_chunks': 4,
-    'fft_window_type': AudioHandler.WINDOW_TYPE_HAMMING,
+    'fft_window_type': AudioHandler.WINDOW_TYPE_HANNING,
 
     'noise_filter_order': 5,
     'noise_random_seed': 0,

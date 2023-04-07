@@ -1,5 +1,5 @@
 """
- Copyright (C) 2022 Fern Lane, Pulsely project
+ Copyright (C) 2022 Fern Lane, SonicEval (aka Pulsely) project
  Licensed under the GNU Affero General Public License, Version 3.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -14,6 +14,7 @@
  ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  OTHER DEALINGS IN THE SOFTWARE.
 """
+
 import array
 import math
 import threading
@@ -52,8 +53,7 @@ PEAKS_THRESHOLD_VOLUME = 1.1
 NORMALIZE_FREQUENCY = 1000
 
 # Minimum THD level
-THD_DB_MIN = -100.
-THD_RATIO_MIN = math.pow(10, THD_DB_MIN / 20.)
+THD_RATIO_MIN = 0.001 / 100.
 
 # Defines
 DEVICE_TYPE_INPUT = 0
@@ -116,10 +116,11 @@ def compute_fft_smag(data, window: np.ndarray, window_type: int, signal_type=TES
     return s_mag
 
 
-def s_mag_to_dbfs(data_s_mag):
+def s_mag_to_dbfs(data_s_mag, base=20):
     """
     Converts signal magnitude to dbfs
     :param data_s_mag:
+    :param base: 20 for audio, 10 for percents
     :return:
     """
     # Prevent zero values
@@ -127,18 +128,19 @@ def s_mag_to_dbfs(data_s_mag):
     data_s_mag[data_s_mag < min_value] = min_value
 
     # Convert to dBFS
-    return 20 * np.log10(data_s_mag)
+    return base * np.log10(data_s_mag)
 
 
-def dbfs_to_s_mag(data_dbfs):
+def dbfs_to_s_mag(data_dbfs, base=20):
     """
     Converts dbfs to signal magnitude
     :param data_dbfs:
+    :param base: 20 for audio, 10 for percents
     :return:
     """
 
     # Convert to magnitude
-    return np.power(10., np.divide(data_dbfs, 20.))
+    return np.power(10., np.divide(data_dbfs, base))
 
 
 def generate_window(window_type: int, length: int):
@@ -988,9 +990,9 @@ class AudioHandler:
             if len(distortions_) > 0:
                 for channel_n in range(channels_n):
                     channel_distortions_ = distortions_[channel_n]
-                    min_index = np.argmax(channel_distortions_ > THD_DB_MIN)
+                    min_index = np.argmax(channel_distortions_ > THD_RATIO_MIN)
                     if min_index is not None and min_index >= 0:
-                        thd_score = clamp(-np.average(channel_distortions_[min_index:]), 0, 100)
+                        thd_score = 100 - clamp(np.average(channel_distortions_[min_index:]), 0, 100)
                         total_score[channel_n] = total_score[channel_n] + thd_score
                         total_score[channel_n] = np.divide(total_score[channel_n], 2)
 

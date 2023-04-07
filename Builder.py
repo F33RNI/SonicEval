@@ -1,5 +1,5 @@
 """
- Copyright (C) 2022 Fern Lane, Pulsely project
+ Copyright (C) 2022 Fern Lane, SonicEval (aka Pulsely) project
  Licensed under the GNU Affero General Public License, Version 3.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -21,9 +21,9 @@ import subprocess
 import time
 import platform
 
-import Pulsely
+import SonicEval
 
-MAIN_FILE = 'Pulsely'
+MAIN_FILE = 'SonicEval'
 
 # Text to add to the spec file
 SPEC_FILE_HEADER = 'import PyInstaller.config\n' \
@@ -150,7 +150,7 @@ if __name__ == '__main__':
                     time.sleep(1)
 
                     # Rename final folder
-                    os.rename('dist/' + MAIN_FILE, 'dist/' + MAIN_FILE + '-' + Pulsely.APP_VERSION
+                    os.rename('dist/' + MAIN_FILE, 'dist/' + MAIN_FILE + '-' + SonicEval.APP_VERSION
                               + '-' + str(platform.system() + '-' + str(platform.machine())))
 
                 else:

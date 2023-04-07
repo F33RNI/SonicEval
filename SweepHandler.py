@@ -1,5 +1,5 @@
 """
- Copyright (C) 2022 Fern Lane, Pulsely project
+ Copyright (C) 2022 Fern Lane, SonicEval (aka Pulsely) project
  Licensed under the GNU Affero General Public License, Version 3.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -14,6 +14,7 @@
  ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  OTHER DEALINGS IN THE SOFTWARE.
 """
+
 import array
 import math
 import threading
@@ -25,68 +26,84 @@ from PyQt5 import QtCore
 from AudioHandler import generate_window, compute_fft_smag, s_mag_to_dbfs, \
     frequency_to_index, index_to_frequency, clamp, THD_RATIO_MIN
 
+THD_HARMONICS_NUM = 6
 
-def get_thd_rms_ratio(fft_smag, frequency, peak_index, sample_rate, data_length, thd_rms_ratio_last,
-                      internal_reference_value, filter_k):
+
+def get_thd_rms_ratio(fft_dbfs, frequency, peak_index, sample_rate, data_length, internal_reference_value):
     """
     Calculates total harmonic distortion of signal
-    :param fft_smag: signal fft
+    TODO: Make it better
+    :param fft_dbfs: signal fft in dBFS
     :param frequency: fundamental frequency in hz
     :param peak_index: index of fundamental harmonic in given fft
     :param sample_rate: sampling rate
     :param data_length: length of data (before fft)
-    :param thd_rms_ratio_last: previous result
     :param internal_reference_value: reference value
     :return: sqrt(V2^2 + V3^2 + V4^2 + ...) / V1
-    :param filter_k: 0-1
     """
+
     fundamental_frequency_index = frequency_to_index(frequency, sample_rate, data_length)
     first_harmonic_frequency_index = frequency_to_index(frequency * 2, sample_rate, data_length)
 
     # Check if frequency is not at start and next harmonic > current frequency
-    if frequency > (sample_rate / data_length) * 10. and first_harmonic_frequency_index > fundamental_frequency_index:
+    if frequency > (sample_rate / data_length) * 5. \
+            and first_harmonic_frequency_index > fundamental_frequency_index:
+        # Initial harmonic frequency and index in fft
         harmonic_frequency = frequency * 2
         harmonic_index_last = frequency_to_index(frequency, sample_rate, data_length)
+
+        # Count from 2 because we start from first harmonic (2x fundamental)
         harmonics_counter = 2
-        # Find all harmonics
-        harmonic_magnitude_squared_sum = 0.
+
+        # Sum of differences between fundamental and all harmonics (sqrt of that is the result)
+        magnitude_sum = 0
+
         while harmonic_frequency < sample_rate // 2:
+            # Calculate start and stop indexes of possible harmonic peak
             harmonic_frequency_start_index = clamp(
                 frequency_to_index(harmonic_frequency, sample_rate, data_length) - 1, 1, data_length // 2)
             harmonic_frequency_stop_index = clamp(
                 frequency_to_index(harmonic_frequency, sample_rate, data_length) + 1, 1, data_length // 2)
 
-            magnitude_max = np.max(fft_smag[harmonic_frequency_start_index: harmonic_frequency_stop_index])
-            magnitude_max_index = np.where(fft_smag == magnitude_max)[0][0]
+            # Found peak value and index
+            if harmonic_frequency_start_index != harmonic_frequency_stop_index:
+                dbfs_max = np.max(fft_dbfs[harmonic_frequency_start_index: harmonic_frequency_stop_index])
+                dbfs_max_index = np.where(fft_dbfs == dbfs_max)[0][0]
+            else:
+                dbfs_max = fft_dbfs[harmonic_frequency_start_index]
+                dbfs_max_index = harmonic_frequency_start_index
 
             # If index has changed
-            if magnitude_max_index > harmonic_index_last:
-                if harmonic_frequency_start_index != harmonic_frequency_stop_index:
-                    harmonic_magnitude = magnitude_max
-                else:
-                    harmonic_magnitude = fft_smag[harmonic_frequency_start_index]
+            if dbfs_max_index > harmonic_index_last:
+                # Calculate dBC (difference in Db between carrier and harmonic)
+                dbc = dbfs_max - fft_dbfs[peak_index]
 
-                harmonic_magnitude_squared_sum += math.pow(harmonic_magnitude, 2)
+                # Convert to magnitude
+                dbc_in_mag = math.pow(10., dbc / 10.)
+
+                # Add to sum
+                magnitude_sum += dbc_in_mag
 
                 # Store current index
-                harmonic_index_last = magnitude_max_index
+                harmonic_index_last = dbfs_max_index
 
-            # Use only first 10 harmonics
-            if harmonics_counter > 10:
+            # Use only first THD_HARMONICS_NUM harmonics
+            if harmonics_counter > THD_HARMONICS_NUM:
                 break
 
             # Calculate next frequency
             harmonics_counter += 1
             harmonic_frequency = frequency * harmonics_counter
 
-        thd_ratio = math.sqrt(harmonic_magnitude_squared_sum) / fft_smag[peak_index]
+        # Finally, calculate TDH ratio
+        thd_ratio = math.sqrt(magnitude_sum)
+
+        # Clip THD ratio to 0 to 1
+        thd_ratio = clamp(thd_ratio, 0., 1.)
 
     # Can not calculate thd
     else:
         thd_ratio = 0.
-
-    # Filter thd
-    thd_ratio = thd_rms_ratio_last * filter_k + thd_ratio * (1. - filter_k)
 
     # Apply internal reference
     if internal_reference_value is not None:
@@ -98,10 +115,6 @@ def get_thd_rms_ratio(fft_smag, frequency, peak_index, sample_rate, data_length,
     # Limit to the minimum value
     if thd_ratio < THD_RATIO_MIN:
         thd_ratio = THD_RATIO_MIN
-
-    # Filter again with 1/2 filter_k
-    if internal_reference_value is not None:
-        thd_ratio = thd_rms_ratio_last * (filter_k / 2) + thd_ratio * (1. - (filter_k / 2))
 
     return thd_ratio
 
@@ -239,9 +252,6 @@ class SweepHandler:
             sweep_frequencies_position = 0
             fft_buffer_position = 0
 
-            # THD filter (fft size based)
-            thd_filter = clamp(np.log10(10. - fft_size_chunks), 0., 1.)
-
             # Delay buffer for internal_calibration mode
             calibration_delay_buffer = np.zeros(chunk_size * (latency_chunks + 1), dtype=np.float32)
 
@@ -274,7 +284,6 @@ class SweepHandler:
             sweep_result_distortions = np.empty((recording_channels, 0), dtype=np.float32)
             result_dbfs_buffer_temp = np.zeros(recording_channels, dtype=np.float32)
             result_distortions_buffer_temp = np.zeros(recording_channels, dtype=np.float32)
-            distortions_ratio_last = np.zeros(recording_channels, dtype=np.float64)
 
             sweep_result_frequencies = np.empty(0, dtype=np.int32)
 
@@ -387,15 +396,14 @@ class SweepHandler:
 
                             # Calculate harmonic distortions
                             if not internal_calibration:
-                                thd_ratio = get_thd_rms_ratio(fft_smag, frequency_delayed, peak_index, sample_rate,
-                                                              data_length, distortions_ratio_last[channel_n],
+                                thd_ratio = get_thd_rms_ratio(fft_dbfs, frequency_delayed, peak_index, sample_rate,
+                                                              data_length,
                                                               self.internal_reference_distortions[channel_n]
-                                                              [len(sweep_result_distortions[0]) - 1], thd_filter)
+                                                              [len(sweep_result_distortions[0])])
                             else:
-                                thd_ratio = get_thd_rms_ratio(fft_smag, frequency_delayed, peak_index, sample_rate,
-                                                              data_length, distortions_ratio_last[channel_n],
-                                                              None, thd_filter)
-                            distortions_ratio_last[channel_n] = thd_ratio
+                                thd_ratio = get_thd_rms_ratio(fft_dbfs, frequency_delayed, peak_index, sample_rate,
+                                                              data_length, None)
+
                             result_distortions_buffer_temp[channel_n] += thd_ratio
 
                             # Frequency of actual fft peak
@@ -449,17 +457,40 @@ class SweepHandler:
                         # Normal mode
                         if not internal_calibration:
                             # Send level data to AudioHandler class
-                            # Apply internal reference
-                            if self.internal_reference_dbfs is not None and len(self.internal_reference_dbfs) > 0 \
+                            # Apply internal reference to frequency response
+                            if self.internal_reference_dbfs is not None \
+                                    and len(self.internal_reference_dbfs) > 0 \
                                     and len(self.internal_reference_dbfs[0]) >= len(sweep_result_dbfs[0]):
                                 self.audio_handler.frequency_response_levels_per_channels \
                                     = np.subtract(sweep_result_dbfs,
-                                                  self.internal_reference_dbfs[:, 0: len(sweep_result_dbfs[0])])
+                                                  self.internal_reference_dbfs[:, :len(sweep_result_dbfs[0])])
                             else:
                                 self.audio_handler.frequency_response_levels_per_channels = sweep_result_dbfs
 
-                            # Send distortion data to AudioHandler class
-                            self.audio_handler.frequency_response_distortions = s_mag_to_dbfs(sweep_result_distortions)
+                            # Apply internal reference to THD
+                            sweep_result_distortions_ = sweep_result_distortions.copy()
+                            if self.internal_reference_distortions is not None \
+                                    and len(self.internal_reference_distortions) > 0 \
+                                    and len(self.internal_reference_distortions[0]) \
+                                    >= len(sweep_result_distortions_[0]):
+                                self.audio_handler.frequency_response_distortions = \
+                                    np.subtract(sweep_result_distortions_,
+                                                self.
+                                                internal_reference_distortions[:, :len(sweep_result_distortions_[0])])
+                            else:
+                                self.audio_handler.frequency_response_distortions = sweep_result_distortions_
+
+                            # Filter THD
+                            for channel_n_ in range(len(self.audio_handler.frequency_response_distortions)):
+                                # Replace zero values with previous one
+                                for i_ in range(1, len(self.audio_handler.frequency_response_distortions[channel_n_])):
+                                    if self.audio_handler.frequency_response_distortions[channel_n_][i_] <= 0.:
+                                        self.audio_handler.frequency_response_distortions[channel_n_][i_] \
+                                            = self.audio_handler.frequency_response_distortions[channel_n_][i_ - 1]
+
+                            # Convert to percents
+                            self.audio_handler.frequency_response_distortions \
+                                = np.multiply(self.audio_handler.frequency_response_distortions, 100.)
 
                             # Send frequency data to AudioHandler class
                             self.audio_handler.frequency_response_frequencies = sweep_result_frequencies.copy()
@@ -513,8 +544,8 @@ class SweepHandler:
 
             # Save internal calibration
             if internal_calibration:
-                self.internal_reference_dbfs = sweep_result_dbfs
-                self.internal_reference_distortions = sweep_result_distortions
+                self.internal_reference_dbfs = sweep_result_dbfs.copy()
+                self.internal_reference_distortions = sweep_result_distortions.copy()
 
         # Error during sweep
         except Exception as e:

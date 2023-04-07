@@ -1,5 +1,5 @@
 """
- Copyright (C) 2022 Fern Lane, Pulsely project
+ Copyright (C) 2022 Fern Lane, SonicEval (aka Pulsely) project
  Licensed under the GNU Affero General Public License, Version 3.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -14,6 +14,7 @@
  ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  OTHER DEALINGS IN THE SOFTWARE.
 """
+
 import math
 
 import numpy as np
@@ -26,8 +27,8 @@ GRAPH_DBFS_RANGE_FROM = -60
 GRAPH_DBFS_RANGE_TO = 10
 GRAPH_DBFS_NORM_RANGE_FROM = -40
 GRAPH_DBFS_NORM_RANGE_TO = 30
-GRAPH_DISTORTIONS_RANGE_FROM = -80
-GRAPH_DISTORTIONS_RANGE_TO = -10
+GRAPH_THD_RANGE_FROM = 0.05
+GRAPH_THD_RANGE_TO = 100
 
 
 class GraphPlot:
@@ -71,16 +72,16 @@ class GraphPlot:
 
         # Set axes name
         self.graph_widget.setLabel('left', 'Level', units='dBFS')
-        self.graph_widget.setLabel('right', 'Total harmonic distortion, IEEE', units='dB')
+        self.graph_widget.setLabel('right', 'Total harmonic distortion, IEEE', units='%')
         self.graph_widget.setLabel('bottom', 'Frequency', units='Hz')
 
         # Set axes range
         self.plot_set_axes_range(frequency_list)
 
-        # Enable log mode on frequency scale
+        # Enable log mode on frequency and THD scales
         self.frequency_response_plotter.getAxis('bottom').setLogMode(True)
         self.frequency_response_plotter.getAxis('left').setLogMode(False)
-        self.frequency_response_plotter.getAxis('right').setLogMode(False)
+        self.frequency_response_plotter.getAxis('right').setLogMode(True)
 
     def distortions_plotter_update_view(self):
         self.distortions_plotter.setGeometry(self.frequency_response_plotter.vb.sceneBoundingRect())
@@ -106,7 +107,7 @@ class GraphPlot:
             self.frequency_response_plotter.setYRange(GRAPH_DBFS_NORM_RANGE_FROM, GRAPH_DBFS_NORM_RANGE_TO)
         else:
             self.frequency_response_plotter.setYRange(GRAPH_DBFS_RANGE_FROM, GRAPH_DBFS_RANGE_TO)
-        self.distortions_plotter.setYRange(GRAPH_DISTORTIONS_RANGE_FROM, GRAPH_DISTORTIONS_RANGE_TO)
+        self.distortions_plotter.setYRange(math.log10(GRAPH_THD_RANGE_FROM), math.log10(GRAPH_THD_RANGE_TO))
 
     def plots_prepare(self, recording_channels):
         """
@@ -197,9 +198,11 @@ class GraphPlot:
                             .setData(x=np.log10(frequencies), y=levels_copy[channel_n])
 
                         # Plot distortions
+                        distortions_copy[channel_n][distortions_copy[channel_n] < np.finfo(np.float32).eps] \
+                            = np.finfo(np.float32).eps
                         if distortions_copy is not None:
                             self.graph_curves_distortions[channel_n] \
-                                .setData(x=np.log10(frequencies), y=distortions_copy[channel_n])
+                                .setData(x=np.log10(frequencies), y=np.log10(distortions_copy[channel_n]))
 
         # Set axes range
         self.plot_set_axes_range(frequencies, normalize)

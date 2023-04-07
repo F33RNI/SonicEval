@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>912</width>
-    <height>451</height>
+    <height>455</height>
    </rect>
   </property>
   <property name="font">
@@ -17,7 +17,7 @@
    </font>
   </property>
   <property name="windowTitle">
-   <string>Pulsely</string>
+   <string>SonicEval</string>
   </property>
   <property name="layoutDirection">
    <enum>Qt::LeftToRight</enum>
@@ -64,7 +64,7 @@
         <property name="geometry">
          <rect>
           <x>0</x>
-          <y>0</y>
+          <y>-169</y>
           <width>325</width>
           <height>1176</height>
          </rect>
@@ -78,7 +78,7 @@
             </font>
            </property>
            <property name="text">
-            <string>Pulsely</string>
+            <string>SonicEval</string>
            </property>
           </widget>
          </item>

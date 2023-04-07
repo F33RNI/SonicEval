@@ -1,5 +1,5 @@
 """
- Copyright (C) 2022 Fern Lane, Pulsely project
+ Copyright (C) 2022 Fern Lane, SonicEval (aka Pulsely) project
  Licensed under the GNU Affero General Public License, Version 3.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
@@ -14,6 +14,7 @@
  ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  OTHER DEALINGS IN THE SOFTWARE.
 """
+
 import ctypes
 import os
 import sys
@@ -31,7 +32,7 @@ import NoiseHandler
 import SettingsHandler
 import SweepHandler
 
-APP_VERSION = '2.1.2'
+APP_VERSION = '3.0.0'
 
 SETTINGS_FILE = 'settings.json'
 
@@ -68,8 +69,8 @@ class Window(QMainWindow):
         uic.loadUi('gui.ui', self)
 
         # Set window and app title
-        self.setWindowTitle('Pulsely ' + APP_VERSION)
-        self.app_title.setText('Pulsely ' + APP_VERSION)
+        self.setWindowTitle('SonicEval ' + APP_VERSION)
+        self.app_title.setText('SonicEval ' + APP_VERSION)
 
         # Set icon
         self.setWindowIcon(QtGui.QIcon('icon.png'))
@@ -692,8 +693,8 @@ class Window(QMainWindow):
 if __name__ == '__main__':
     # Replace icon in taskbar
     if os.name == 'nt':
-        pulsely_app_ip = 'f3rni.pulsely.pulsely.' + APP_VERSION
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(pulsely_app_ip)
+        soniceval_app_ip = 'f3rni.soniceval.soniceval.' + APP_VERSION
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(soniceval_app_ip)
 
     # Start app
     app = QApplication.instance() or QApplication(sys.argv)
