@@ -75,6 +75,8 @@ if __name__ == '__main__':
 
     # Other command arguments
     pyi_command.insert(0, '--windowed')
+    pyi_command.insert(0, '_bootlocale')
+    pyi_command.insert(0, '--exclude-module')
     # pyi_command.insert(0, '--onefile')
     pyi_command.insert(0, 'pyi-makespec')
 
@@ -83,6 +85,7 @@ if __name__ == '__main__':
         os.remove(MAIN_FILE + '.spec')
 
     # Execute pyi
+    print(" ".join(pyi_command))
     subprocess.run(pyi_command, text=True)
 
     # Spec file generated
