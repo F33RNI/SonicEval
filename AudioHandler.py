@@ -124,7 +124,7 @@ def s_mag_to_dbfs(data_s_mag, base=20):
     :return:
     """
     # Prevent zero values
-    min_value = np.finfo(np.float).eps
+    min_value = np.finfo(np.float32).eps
     data_s_mag[data_s_mag < min_value] = min_value
 
     # Convert to dBFS
